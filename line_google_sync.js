@@ -15,14 +15,22 @@
   };
   let tokenClient = null;
   let uploadTimer = null;
+  let cachedFolderId = "";
 
   function fileName() {
     return cfg.fileName || "vivo_r01_line_data.json";
   }
 
+  function folderPathParts() {
+    const raw = (cfg.folderPath || cfg.folderName || "").trim();
+    if (!raw) return [];
+    return raw.replace(/^\/+|\/+$/g, "").split("/").map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+
   function storageKey() {
     const email = (state.account && (state.account.email || state.account.username)) || "default";
-    return "line_google_drive_file_id_" + email + "_" + fileName();
+    const folderKey = (cfg.folderId || folderPathParts().join("/") || "root");
+    return "line_google_drive_file_id_" + email + "_" + folderKey + "_" + fileName();
   }
 
   function loadStoredFileId() {
@@ -143,14 +151,77 @@
     });
   }
 
-  function findFileByName() {
-    const name = fileName().replace(/'/g, "\\'");
-    const q = encodeURIComponent("name='" + name + "' and trashed=false");
-    // 同名多份時取「最近修改」的那一份，避免手機讀到舊檔
+  function findChildFolder(parentId, name) {
+    const safe = name.replace(/'/g, "\\'");
+    const q = encodeURIComponent(
+      "mimeType='application/vnd.google-apps.folder' and name='" + safe +
+      "' and '" + parentId + "' in parents and trashed=false"
+    );
     return driveFetch(
       "https://www.googleapis.com/drive/v3/files?q=" + q +
-      "&fields=files(id,name,modifiedTime)&pageSize=10&spaces=drive&orderBy=modifiedTime desc"
+      "&fields=files(id,name)&pageSize=1&spaces=drive"
     ).then(function (res) {
+      if (!res.ok) return res.text().then(function (t) { throw new Error("搜尋資料夾失敗 " + res.status + " " + t); });
+      return res.json();
+    }).then(function (data) {
+      return (data.files && data.files[0] && data.files[0].id) || "";
+    });
+  }
+
+  function createChildFolder(parentId, name) {
+    const meta = {
+      name: name,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [parentId]
+    };
+    return driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(meta)
+    }).then(function (res) {
+      if (!res.ok) return res.text().then(function (t) { throw new Error("建立資料夾失敗 " + res.status + " " + t); });
+      return res.json();
+    }).then(function (f) { return f.id; });
+  }
+
+  function ensureFolderId() {
+    const fixed = (cfg.folderId || "").trim();
+    if (fixed) {
+      cachedFolderId = fixed;
+      return Promise.resolve(fixed);
+    }
+    if (cachedFolderId) return Promise.resolve(cachedFolderId);
+    const parts = folderPathParts();
+    if (!parts.length) {
+      cachedFolderId = "root";
+      return Promise.resolve("root");
+    }
+    let chain = Promise.resolve("root");
+    parts.forEach(function (part) {
+      chain = chain.then(function (parentId) {
+        return findChildFolder(parentId, part).then(function (id) {
+          if (id) return id;
+          return createChildFolder(parentId, part);
+        });
+      });
+    });
+    return chain.then(function (id) {
+      cachedFolderId = id;
+      return id;
+    });
+  }
+
+  function findFileByName() {
+    const name = fileName().replace(/'/g, "\\'");
+    return ensureFolderId().then(function (folderId) {
+      let q = "name='" + name + "' and trashed=false";
+      if (folderId && folderId !== "root") q += " and '" + folderId + "' in parents";
+      else if (folderId === "root") q += " and 'root' in parents";
+      return driveFetch(
+        "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
+        "&fields=files(id,name,modifiedTime)&pageSize=10&spaces=drive&orderBy=modifiedTime desc"
+      );
+    }).then(function (res) {
       if (!res.ok) return res.text().then(function (t) { throw new Error("搜尋雲端檔失敗 " + res.status + " " + t); });
       return res.json();
     }).then(function (data) {
@@ -163,11 +234,14 @@
   }
 
   function createFile() {
-    const meta = { name: fileName(), mimeType: "application/json" };
-    return driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(meta)
+    return ensureFolderId().then(function (folderId) {
+      const meta = { name: fileName(), mimeType: "application/json" };
+      if (folderId) meta.parents = [folderId];
+      return driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(meta)
+      });
     }).then(function (res) {
       if (!res.ok) return res.text().then(function (t) { throw new Error("建立雲端檔失敗 " + res.status + " " + t); });
       return res.json();
@@ -178,7 +252,7 @@
   }
 
   function ensureFileId() {
-    // 一律先用檔名找「最新修改」的檔，避免手機／電腦各自記住不同 fileId
+    // 一律先在指定資料夾用檔名找「最新修改」的檔
     return findFileByName().then(function (id) {
       if (id) return id;
       const fixed = (cfg.fileId || "").trim();

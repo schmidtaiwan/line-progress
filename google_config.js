@@ -1,16 +1,21 @@
 /* Google Cloud OAuth 用戶端（網頁應用程式）
  *
- * 1. https://console.cloud.google.com/ → 建立專案
- * 2. 啟用「Google Drive API」
- * 3. 憑證 → 建立 OAuth 用戶端 ID → 應用程式類型「網頁應用程式」
- * 4. 已授權的 JavaScript 來源加：
- *      http://localhost:8765
- *      https://你的帳號.github.io
- *      （若 repo 專案站：https://你的帳號.github.io/儲存庫名）
- * 5. 把用戶端 ID 貼到下面 clientId
+ * folderPath：雲端硬碟路徑（相對於「我的雲端硬碟」根目錄）
+ *   例： "架線進度"           → 根目錄下的「架線進度」資料夾
+ *       "專案/架線進度/資料"   → 多層資料夾（不存在會自動建立）
+ *   留空 "" = 存在根目錄
+ *
+ * folderId：若已知資料夾 ID 可直接填（優先於 folderPath）
+ *   開資料夾 → 網址 .../folders/xxxxxxxx 的那一段
  */
 window.GOOGLE_CONFIG = {
   clientId: "865222319751-1jbqneceh84tf5b0mst6g7b2re88q1cu.apps.googleusercontent.com",
-  // 會建立／讀寫在你 Google 雲端硬碟根目錄（由本 App 建立的檔）
+
+  // ↓ 指定上傳資料夾（可改成你要的路徑）
+  folderPath: "架線進度",
+
+  // 或改用資料夾 ID（有填則忽略 folderPath）
+  folderId: "",
+
   fileName: "vivo_r01_line_data.json"
 };
