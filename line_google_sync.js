@@ -211,25 +211,47 @@
     });
   }
 
-  function findFileByName() {
+  function driveListByQuery(q) {
+    return driveFetch(
+      "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
+      "&fields=files(id,name,modifiedTime,parents)&pageSize=20&spaces=drive&orderBy=modifiedTime desc"
+    ).then(function (res) {
+      if (!res.ok) return res.text().then(function (t) { throw new Error("搜尋雲端檔失敗 " + res.status + " " + t); });
+      return res.json();
+    }).then(function (data) {
+      return (data.files && data.files.length) ? data.files : [];
+    });
+  }
+
+  function findFilesInFolder() {
     const name = fileName().replace(/'/g, "\\'");
     return ensureFolderId().then(function (folderId) {
       let q = "name='" + name + "' and trashed=false";
       if (folderId && folderId !== "root") q += " and '" + folderId + "' in parents";
       else if (folderId === "root") q += " and 'root' in parents";
-      return driveFetch(
-        "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
-        "&fields=files(id,name,modifiedTime)&pageSize=10&spaces=drive&orderBy=modifiedTime desc"
-      );
-    }).then(function (res) {
-      if (!res.ok) return res.text().then(function (t) { throw new Error("搜尋雲端檔失敗 " + res.status + " " + t); });
-      return res.json();
-    }).then(function (data) {
-      if (data.files && data.files.length) {
-        saveStoredFileId(data.files[0].id);
-        return data.files[0].id;
+      return driveListByQuery(q);
+    });
+  }
+
+  function findFilesAnywhere() {
+    const name = fileName().replace(/'/g, "\\'");
+    return driveListByQuery("name='" + name + "' and trashed=false");
+  }
+
+  /** 先找指定資料夾，沒有再找整個雲端硬碟（根目錄舊檔也能找到） */
+  function findFileByName() {
+    return findFilesInFolder().then(function (files) {
+      if (files.length) {
+        saveStoredFileId(files[0].id);
+        return files[0].id;
       }
-      return "";
+      return findFilesAnywhere().then(function (all) {
+        if (all.length) {
+          saveStoredFileId(all[0].id);
+          return all[0].id;
+        }
+        return "";
+      });
     });
   }
 
@@ -252,7 +274,7 @@
   }
 
   function ensureFileId() {
-    // 一律先在指定資料夾用檔名找「最新修改」的檔
+    // 上傳用：先找（含全碟 fallback），沒有才在指定資料夾新建
     return findFileByName().then(function (id) {
       if (id) return id;
       const fixed = (cfg.fileId || "").trim();
@@ -262,6 +284,44 @@
       }
       return createFile();
     });
+  }
+
+  function fetchJsonById(id) {
+    return driveFetch("https://www.googleapis.com/drive/v3/files/" + id + "?alt=media")
+      .then(function (res) {
+        if (res.status === 404) return null;
+        if (!res.ok) {
+          return res.text().then(function (t) {
+            throw new Error("下載失敗 " + res.status + " " + t);
+          });
+        }
+        return res.text().then(function (text) {
+          if (!text || !String(text).trim()) return null;
+          try {
+            return JSON.parse(text);
+          } catch (e) {
+            return null;
+          }
+        });
+      });
+  }
+
+  /** 依序嘗試多個候選檔，略過空檔（避免誤建的空 JSON） */
+  function downloadFirstNonEmpty(files) {
+    let chain = Promise.resolve(null);
+    (files || []).forEach(function (f) {
+      chain = chain.then(function (hit) {
+        if (hit) return hit;
+        return fetchJsonById(f.id).then(function (data) {
+          if (data) {
+            saveStoredFileId(f.id);
+            return data;
+          }
+          return null;
+        });
+      });
+    });
+    return chain;
   }
 
   function isScopeError(text) {
@@ -289,32 +349,18 @@
       })
       .then(function () {
         return withScopeRetry(function () {
-          return ensureFileId().then(function (id) {
-            if (!id) return null;
-            return driveFetch("https://www.googleapis.com/drive/v3/files/" + id + "?alt=media")
-              .then(function (res) {
-                if (res.status === 404) {
-                  saveStoredFileId("");
-                  return findFileByName().then(function (nid) {
-                    if (!nid) return null;
-                    return driveFetch("https://www.googleapis.com/drive/v3/files/" + nid + "?alt=media");
-                  });
-                }
-                return res;
-              })
-              .then(function (res) {
-                if (!res) return null;
-                if (res.status === 404) return null;
-                if (!res.ok) {
-                  return res.text().then(function (t) {
-                    throw new Error("下載失敗 " + res.status + " " + t);
-                  });
-                }
-                return res.text().then(function (text) {
-                  if (!text || !String(text).trim()) return null;
-                  return JSON.parse(text);
-                });
+          // 下載不新建空檔；先資料夾、再全碟，略過無內容的檔
+          return findFilesInFolder().then(function (inFolder) {
+            return downloadFirstNonEmpty(inFolder).then(function (data) {
+              if (data) return data;
+              return findFilesAnywhere().then(function (anywhere) {
+                // 略過已在資料夾試過的 id
+                const tried = {};
+                inFolder.forEach(function (f) { tried[f.id] = true; });
+                const rest = anywhere.filter(function (f) { return !tried[f.id]; });
+                return downloadFirstNonEmpty(rest.length ? rest : anywhere);
               });
+            });
           });
         });
       })
