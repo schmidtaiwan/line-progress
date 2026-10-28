@@ -11,11 +11,20 @@
     ready: false,
     lastCloudAt: "",
     busy: false,
-    fileId: ""
+    fileId: "",
+    viewers: 0,
+    viewerList: []
   };
   let tokenClient = null;
   let uploadTimer = null;
   let cachedFolderId = "";
+  let presenceTimer = null;
+  let presenceFileId = "";
+  let presenceBusy = false;
+  let onViewersChange = null;
+  const PRESENCE_TTL_MS = 45000;
+  const PRESENCE_INTERVAL_MS = 12000;
+  const PRESENCE_PREFIX = "vivo_r01_view_";
 
   function fileName() {
     return cfg.fileName || "vivo_r01_line_data.json";
@@ -122,18 +131,195 @@
   function login() {
     state.token = "";
     return requestToken("consent").then(function (tok) {
-      return fetchUserEmail(tok);
+      return fetchUserEmail(tok).then(function (acc) {
+        startPresence();
+        return acc;
+      });
     });
   }
 
   function logout() {
-    if (state.token && global.google && google.accounts && google.accounts.oauth2) {
-      google.accounts.oauth2.revoke(state.token, function () {});
+    return stopPresence(true).catch(function () {}).then(function () {
+      if (state.token && global.google && google.accounts && google.accounts.oauth2) {
+        google.accounts.oauth2.revoke(state.token, function () {});
+      }
+      state.token = "";
+      state.account = null;
+      state.fileId = "";
+      state.viewers = 0;
+      state.viewerList = [];
+      notifyViewers();
+    });
+  }
+
+  function viewSessionId() {
+    const key = "line_google_view_session_id";
+    try {
+      let id = localStorage.getItem(key);
+      if (!id) {
+        id = "s" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+        localStorage.setItem(key, id);
+      }
+      return id;
+    } catch (e) {
+      return "s" + String(Date.now());
     }
-    state.token = "";
-    state.account = null;
-    state.fileId = "";
-    return Promise.resolve();
+  }
+
+  function deviceLabel() {
+    const ua = navigator.userAgent || "";
+    if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return "手機";
+    return "電腦";
+  }
+
+  function presenceFileName() {
+    return PRESENCE_PREFIX + viewSessionId() + ".json";
+  }
+
+  function notifyViewers() {
+    if (typeof onViewersChange === "function") {
+      try { onViewersChange(state.viewers, state.viewerList); } catch (e) {}
+    }
+  }
+
+  function ensurePresenceFileId() {
+    if (presenceFileId) return Promise.resolve(presenceFileId);
+    const name = presenceFileName().replace(/'/g, "\\'");
+    return ensureFolderId().then(function (folderId) {
+      let q = "name='" + name + "' and trashed=false";
+      if (folderId && folderId !== "root") q += " and '" + folderId + "' in parents";
+      else q += " and 'root' in parents";
+      return driveListByQuery(q).then(function (files) {
+        if (files.length) {
+          presenceFileId = files[0].id;
+          return presenceFileId;
+        }
+        const meta = { name: presenceFileName(), mimeType: "application/json" };
+        if (folderId) meta.parents = [folderId];
+        return driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(meta)
+        }).then(function (res) {
+          if (!res.ok) return res.text().then(function (t) { throw new Error("建立連線檔失敗 " + res.status + " " + t); });
+          return res.json();
+        }).then(function (f) {
+          presenceFileId = f.id;
+          return presenceFileId;
+        });
+      });
+    });
+  }
+
+  function listPresenceFiles() {
+    return ensureFolderId().then(function (folderId) {
+      let q = "name contains '" + PRESENCE_PREFIX + "' and trashed=false";
+      if (folderId && folderId !== "root") q += " and '" + folderId + "' in parents";
+      else q += " and 'root' in parents";
+      return driveListByQuery(q);
+    });
+  }
+
+  function writeOwnPresence() {
+    const payload = {
+      sessionId: viewSessionId(),
+      email: (state.account && state.account.email) || "",
+      device: deviceLabel(),
+      lastSeen: new Date().toISOString()
+    };
+    const body = JSON.stringify(payload);
+    return ensurePresenceFileId().then(function (id) {
+      return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + id + "?uploadType=media", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: body
+      }).then(function (res) {
+        if (res.status === 404) {
+          presenceFileId = "";
+          return ensurePresenceFileId().then(function (nid) {
+            return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + nid + "?uploadType=media", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json; charset=utf-8" },
+              body: body
+            });
+          });
+        }
+        return res;
+      }).then(function (res) {
+        if (!res.ok) return res.text().then(function (t) { throw new Error("連線心跳失敗 " + res.status + " " + t); });
+        return payload;
+      });
+    });
+  }
+
+  function refreshViewerCount() {
+    const cutoff = Date.now() - PRESENCE_TTL_MS;
+    return listPresenceFiles().then(function (files) {
+      const live = (files || []).filter(function (f) {
+        const t = f.modifiedTime ? new Date(f.modifiedTime).getTime() : 0;
+        return t >= cutoff;
+      });
+      state.viewers = live.length;
+      state.viewerList = live.map(function (f) {
+        const m = String(f.name || "").match(new RegExp("^" + PRESENCE_PREFIX + "(.+)\\.json$"));
+        return { id: f.id, name: f.name, sessionId: m ? m[1] : "", modifiedTime: f.modifiedTime };
+      });
+      // 自己剛寫過心跳，至少顯示 1
+      if (state.account && state.viewers < 1) state.viewers = 1;
+      notifyViewers();
+      return state.viewers;
+    });
+  }
+
+  function presenceTick() {
+    if (!state.account || presenceBusy) return Promise.resolve(state.viewers);
+    presenceBusy = true;
+    return writeOwnPresence()
+      .then(function () { return refreshViewerCount(); })
+      .catch(function (e) { console.warn(e); return state.viewers; })
+      .finally(function () { presenceBusy = false; });
+  }
+
+  function startPresence(cb) {
+    if (typeof cb === "function") onViewersChange = cb;
+    if (!state.account) return state.viewers;
+    if (presenceTimer) clearInterval(presenceTimer);
+    presenceTick();
+    presenceTimer = setInterval(function () { presenceTick(); }, PRESENCE_INTERVAL_MS);
+    return state.viewers;
+  }
+
+  function stopPresence(removeFile) {
+    if (presenceTimer) {
+      clearInterval(presenceTimer);
+      presenceTimer = null;
+    }
+    const id = presenceFileId;
+    presenceFileId = "";
+    if (!removeFile || !id || !state.token) {
+      state.viewers = 0;
+      state.viewerList = [];
+      notifyViewers();
+      return Promise.resolve();
+    }
+    return driveFetch("https://www.googleapis.com/drive/v3/files/" + id, { method: "DELETE" })
+      .catch(function () {})
+      .then(function () {
+        state.viewers = 0;
+        state.viewerList = [];
+        notifyViewers();
+      });
+  }
+
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden && state.account) presenceTick();
+    });
+  }
+  if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", function () {
+      if (state.account) stopPresence(true);
+    });
   }
 
   function getToken() {
@@ -421,7 +607,11 @@
     }
     if (state.account) {
       const who = state.account.email || state.account.username || "已登入";
-      return "Google 雲端　｜　已登入 " + who +
+      const view =
+        state.viewers > 0
+          ? "　｜　連線查看 " + state.viewers + " 個"
+          : "";
+      return "Google 雲端　｜　已登入 " + who + view +
         (state.lastCloudAt ? "　｜　上次雲端 " + state.lastCloudAt.replace("T", " ").slice(0, 19) : "");
     }
     return "Google 雲端　｜　未登入（登入後才載入資料）";
@@ -436,6 +626,9 @@
     downloadJson: downloadJson,
     uploadJson: uploadJson,
     scheduleUpload: scheduleUpload,
+    startPresence: startPresence,
+    stopPresence: stopPresence,
+    presenceTick: presenceTick,
     statusText: statusText
   };
 
