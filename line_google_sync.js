@@ -146,9 +146,10 @@
   function findFileByName() {
     const name = fileName().replace(/'/g, "\\'");
     const q = encodeURIComponent("name='" + name + "' and trashed=false");
+    // 同名多份時取「最近修改」的那一份，避免手機讀到舊檔
     return driveFetch(
       "https://www.googleapis.com/drive/v3/files?q=" + q +
-      "&fields=files(id,name)&pageSize=5&spaces=drive"
+      "&fields=files(id,name,modifiedTime)&pageSize=10&spaces=drive&orderBy=modifiedTime desc"
     ).then(function (res) {
       if (!res.ok) return res.text().then(function (t) { throw new Error("搜尋雲端檔失敗 " + res.status + " " + t); });
       return res.json();
@@ -177,10 +178,14 @@
   }
 
   function ensureFileId() {
-    loadStoredFileId();
-    if (state.fileId) return Promise.resolve(state.fileId);
+    // 一律先用檔名找「最新修改」的檔，避免手機／電腦各自記住不同 fileId
     return findFileByName().then(function (id) {
       if (id) return id;
+      const fixed = (cfg.fileId || "").trim();
+      if (fixed) {
+        saveStoredFileId(fixed);
+        return fixed;
+      }
       return createFile();
     });
   }
