@@ -1,9 +1,10 @@
-/* Google Identity + Drive API → JSON sync（介面與 LineOneDrive 對齊）
- * 使用 drive.file：不呼叫 files.list（會 403），改以 localStorage 記住 fileId。
+/* Google Identity + Drive API → JSON sync
+ * 使用 drive 範圍（私人用），可用檔名搜尋，手機／電腦才能對到同一份檔。
  */
 (function (global) {
   const cfg = global.GOOGLE_CONFIG || {};
-  const SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email";
+  // drive.file 在部分手機瀏覽器／舊 token 容易 SCOPE 不足；私人用改 drive
+  const SCOPES = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email";
   const state = {
     account: null,
     token: "",
@@ -26,6 +27,11 @@
 
   function loadStoredFileId() {
     try {
+      const fixed = (cfg.fileId || "").trim();
+      if (fixed) {
+        state.fileId = fixed;
+        return;
+      }
       state.fileId = localStorage.getItem(storageKey()) || "";
     } catch (e) {
       state.fileId = "";
@@ -50,7 +56,7 @@
           return;
         }
         if (Date.now() - start > limit) {
-          reject(new Error("Google 登入庫載入逾時（請用 http/https 開啟，勿雙擊 HTML）"));
+          reject(new Error("Google 登入庫載入逾時（請用 http/https 開啟）"));
           return;
         }
         setTimeout(tick, 100);
@@ -58,9 +64,7 @@
     });
   }
 
-  function initMsal() {
-    return ensureInit();
-  }
+  function initMsal() { return ensureInit(); }
 
   function ensureInit() {
     const id = (cfg.clientId || "").trim();
@@ -108,7 +112,7 @@
   }
 
   function login() {
-    // consent：強制重選權限，避免舊 token 沒有 Drive scope
+    state.token = "";
     return requestToken("consent").then(function (tok) {
       return fetchUserEmail(tok);
     });
@@ -139,6 +143,24 @@
     });
   }
 
+  function findFileByName() {
+    const name = fileName().replace(/'/g, "\\'");
+    const q = encodeURIComponent("name='" + name + "' and trashed=false");
+    return driveFetch(
+      "https://www.googleapis.com/drive/v3/files?q=" + q +
+      "&fields=files(id,name)&pageSize=5&spaces=drive"
+    ).then(function (res) {
+      if (!res.ok) return res.text().then(function (t) { throw new Error("搜尋雲端檔失敗 " + res.status + " " + t); });
+      return res.json();
+    }).then(function (data) {
+      if (data.files && data.files.length) {
+        saveStoredFileId(data.files[0].id);
+        return data.files[0].id;
+      }
+      return "";
+    });
+  }
+
   function createFile() {
     const meta = { name: fileName(), mimeType: "application/json" };
     return driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name", {
@@ -157,7 +179,27 @@
   function ensureFileId() {
     loadStoredFileId();
     if (state.fileId) return Promise.resolve(state.fileId);
-    return createFile();
+    return findFileByName().then(function (id) {
+      if (id) return id;
+      return createFile();
+    });
+  }
+
+  function isScopeError(text) {
+    return /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions|insufficient authentication scopes/i.test(text || "");
+  }
+
+  function withScopeRetry(fn) {
+    return fn().catch(function (err) {
+      const msg = String(err && err.message || err);
+      if (!isScopeError(msg)) throw err;
+      state.token = "";
+      return requestToken("consent").then(function () {
+        return fetchUserEmail(state.token);
+      }).then(function () {
+        return fn();
+      });
+    });
   }
 
   function downloadJson() {
@@ -167,20 +209,35 @@
         if (!state.account) return login();
       })
       .then(function () {
-        loadStoredFileId();
-        if (!state.fileId) return null;
-        return driveFetch("https://www.googleapis.com/drive/v3/files/" + state.fileId + "?alt=media")
-          .then(function (res) {
-            if (res.status === 404) {
-              saveStoredFileId("");
-              return null;
-            }
-            if (!res.ok) return res.text().then(function (t) { throw new Error("下載失敗 " + res.status + " " + t); });
-            return res.text().then(function (text) {
-              if (!text || !String(text).trim()) return null;
-              return JSON.parse(text);
-            });
+        return withScopeRetry(function () {
+          return ensureFileId().then(function (id) {
+            if (!id) return null;
+            return driveFetch("https://www.googleapis.com/drive/v3/files/" + id + "?alt=media")
+              .then(function (res) {
+                if (res.status === 404) {
+                  saveStoredFileId("");
+                  return findFileByName().then(function (nid) {
+                    if (!nid) return null;
+                    return driveFetch("https://www.googleapis.com/drive/v3/files/" + nid + "?alt=media");
+                  });
+                }
+                return res;
+              })
+              .then(function (res) {
+                if (!res) return null;
+                if (res.status === 404) return null;
+                if (!res.ok) {
+                  return res.text().then(function (t) {
+                    throw new Error("下載失敗 " + res.status + " " + t);
+                  });
+                }
+                return res.text().then(function (text) {
+                  if (!text || !String(text).trim()) return null;
+                  return JSON.parse(text);
+                });
+              });
           });
+        });
       })
       .finally(function () { state.busy = false; });
   }
@@ -192,31 +249,32 @@
       .then(function () {
         if (!state.account) return login();
       })
-      .then(function () { return ensureFileId(); })
-      .then(function (id) {
-        return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + id + "?uploadType=media", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json; charset=utf-8" },
-          body: body
-        });
-      })
-      .then(function (res) {
-        if (res.status === 404) {
-          saveStoredFileId("");
-          return createFile().then(function (id) {
+      .then(function () {
+        return withScopeRetry(function () {
+          return ensureFileId().then(function (id) {
             return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + id + "?uploadType=media", {
               method: "PATCH",
               headers: { "Content-Type": "application/json; charset=utf-8" },
               body: body
+            }).then(function (res) {
+              if (res.status === 404) {
+                saveStoredFileId("");
+                return createFile().then(function (nid) {
+                  return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + nid + "?uploadType=media", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json; charset=utf-8" },
+                    body: body
+                  });
+                });
+              }
+              return res;
+            }).then(function (res) {
+              if (!res.ok) return res.text().then(function (t) { throw new Error("上傳失敗 " + res.status + " " + t); });
+              state.lastCloudAt = new Date().toISOString();
+              return res.json().catch(function () { return {}; });
             });
           });
-        }
-        return res;
-      })
-      .then(function (res) {
-        if (!res.ok) return res.text().then(function (t) { throw new Error("上傳失敗 " + res.status + " " + t); });
-        state.lastCloudAt = new Date().toISOString();
-        return res.json().catch(function () { return {}; });
+        });
       })
       .finally(function () { state.busy = false; });
   }
