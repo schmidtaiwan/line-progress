@@ -130,7 +130,9 @@
     font-weight: 600;
   }
   nav.tabs button.active { background: var(--bg); color: var(--ink); }
+  /* 設定分頁：未進入時不顯示框；由左上「設定」進入後才出現 */
   nav.tabs button[data-tab="settings"] {
+    display: none;
     margin-left: 4px;
     border: 1px solid rgba(255,255,255,0.35);
     background: rgba(255,255,255,0.12);
@@ -138,6 +140,8 @@
     border-radius: 10px 10px 0 0;
   }
   nav.tabs button[data-tab="settings"].active {
+    display: inline-flex;
+    align-items: center;
     background: var(--bg);
     color: var(--ink);
     border-color: transparent;
@@ -339,6 +343,14 @@
   .gantt-label {
     font-size: 12px; line-height: 1.25;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .gantt-label[data-gantt-eq] {
+    cursor: pointer;
+    user-select: none;
+  }
+  .gantt-label[data-gantt-eq]:hover {
+    color: #1a5276;
+    text-decoration: underline;
   }
   .gantt-label.overall { font-weight: 700; color: #16324a; }
   .gantt-label .sub { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
@@ -1148,21 +1160,21 @@
     <div class="top-right">
       <span class="page-ver" id="pageVer">版次 —</span>
       <div class="top-actions">
-        <button type="button" class="btn-settings-top" data-open-settings title="製程段／階段／時程設定">設定</button>
+        <button type="button" class="btn-settings-top" data-open-settings title="製程段／階段／時程設定">⚙ 設定</button>
         <div class="import-wrap">
-          <button type="button" class="btn-import-top" data-import-menu title="匯入 Excel 或雲端歷史">匯入 ▾</button>
+          <button type="button" class="btn-import-top" data-import-menu title="匯入 Excel 或雲端歷史">📥 匯入 ▾</button>
           <div class="import-menu" id="importMenu">
-            <button type="button" data-import-xlsx>匯入 Excel</button>
-            <button type="button" data-import-history>匯入雲端歷史</button>
+            <button type="button" data-import-xlsx>📊 匯入 Excel</button>
+            <button type="button" data-import-history>☁ 匯入雲端歷史</button>
           </div>
         </div>
         <input type="file" id="importXlsxInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
         <div class="export-wrap">
-          <button type="button" class="btn-export-top" data-export-menu title="匯出到本機／雲端歷史">匯出 ▾</button>
+          <button type="button" class="btn-export-top" data-export-menu title="匯出到本機／雲端歷史">📤 匯出 ▾</button>
           <div class="export-menu" id="exportMenu">
-            <button type="button" data-export-local="excel">匯出 Excel</button>
-            <button type="button" data-export-local="pdf">匯出 PDF</button>
-            <button type="button" data-export-history>存雲端歷史（最多10筆）</button>
+            <button type="button" data-export-local="excel">📊 匯出 Excel</button>
+            <button type="button" data-export-local="pdf">📄 匯出 PDF</button>
+            <button type="button" data-export-history>☁ 存雲端歷史（最多10筆）</button>
           </div>
         </div>
       </div>
@@ -1192,11 +1204,11 @@
   <div class="hist-panel">
     <header>
       <h3>雲端歷史記錄</h3>
-      <button type="button" class="btn-cloud ghost" data-close-history>關閉</button>
+      <button type="button" class="btn-cloud ghost" data-close-history>✖ 關閉</button>
     </header>
     <div class="hist-body" id="historyList"><p class="note">載入中…</p></div>
     <div class="hist-actions">
-      <button type="button" class="btn-cloud ghost" data-close-history>取消</button>
+      <button type="button" class="btn-cloud ghost" data-close-history>✖ 取消</button>
     </div>
   </div>
 </div>
@@ -1209,7 +1221,7 @@
   <div class="photo-preview-box">
     <div class="photo-preview-head">
       <h3 id="photoPreviewTitle">照片預覽</h3>
-      <button type="button" class="btn-cloud ghost" data-close-photo-preview>關閉</button>
+      <button type="button" class="btn-cloud ghost" data-close-photo-preview>✖ 關閉</button>
     </div>
     <div class="photo-preview-list" id="photoPreviewList"></div>
   </div>
@@ -1218,9 +1230,9 @@
   <h3>雲端資料與網頁不一致</h3>
   <p id="syncConflictMsg">偵測到雲端與目前網頁內容不同。請選擇「儲存」覆寫雲端，或「重新載入」採用雲端資料。</p>
   <div class="actions">
-    <button type="button" class="btn-save" data-sync-save>儲存到雲端</button>
-    <button type="button" class="btn-cloud" data-sync-reload>重新載入雲端</button>
-    <button type="button" class="btn-cloud ghost" data-sync-later>稍後再說</button>
+    <button type="button" class="btn-save" data-sync-save>💾 儲存到雲端</button>
+    <button type="button" class="btn-cloud" data-sync-reload>☁ 重新載入雲端</button>
+    <button type="button" class="btn-cloud ghost" data-sync-later>⏳ 稍後再說</button>
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -1246,7 +1258,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 20;
+const PAGE_BUILD = 21;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1491,16 +1503,16 @@ function cloudBarHtml() {
   if (!logged) {
     return `<div class="cloud-bar" id="cloudBar">
       <span class="msg">${escapeHtml(window.LineOneDrive ? LineOneDrive.statusText() : "雲端模組未載入")}</span>
-      <button type="button" class="btn-cloud" data-cloud-login>登入 Google</button>
+      <button type="button" class="btn-cloud" data-cloud-login>🔑 登入 Google</button>
     </div>`;
   }
   return `<div class="cloud-bar" id="cloudBar">
       <span class="msg">${escapeHtml(window.LineOneDrive ? LineOneDrive.statusText() : "雲端模組未載入")}</span>
       ${viewerBadgeHtml()}
-      <button type="button" class="btn-cloud" data-cloud-login>重新登入</button>
-      <button type="button" class="btn-cloud ghost" data-cloud-pull>從雲端載入</button>
-      <button type="button" class="${saveCls}" data-cloud-push title="將本機變更寫入 Google 雲端硬碟">${saveLabel}</button>
-      <button type="button" class="btn-cloud ghost" data-cloud-logout>登出</button>
+      <button type="button" class="btn-cloud" data-cloud-login>🔄 重新登入</button>
+      <button type="button" class="btn-cloud ghost" data-cloud-pull>☁ 從雲端載入</button>
+      <button type="button" class="${saveCls}" data-cloud-push title="將本機變更寫入 Google 雲端硬碟">💾 ${saveLabel}</button>
+      <button type="button" class="btn-cloud ghost" data-cloud-logout>🚪 登出</button>
     </div>`;
 }
 function updateCloudBar() {
@@ -1522,10 +1534,10 @@ function updateCloudBar() {
     badge.textContent = logged ? ("連線查看：" + n + " 個") : "連線查看：—";
   }
   const loginBtn = el.querySelector("[data-cloud-login]");
-  if (loginBtn) loginBtn.textContent = logged ? "重新登入" : "登入 Google";
+  if (loginBtn) loginBtn.textContent = logged ? "🔄 重新登入" : "🔑 登入 Google";
   const saveBtn = el.querySelector("[data-cloud-push]");
   if (saveBtn) {
-    saveBtn.textContent = state.dirty ? "儲存＊" : "儲存";
+    saveBtn.textContent = state.dirty ? "💾 儲存＊" : "💾 儲存";
     saveBtn.classList.toggle("dirty", !!state.dirty);
   }
 }
@@ -1698,7 +1710,7 @@ function toolbar(extra) {
     <div class="chips">${segs.map(s => `<button data-seg="${s}" class="${state.seg === s ? "on" : ""}">${s}</button>`).join("")}</div>
     <input type="search" placeholder="搜尋設備、負責人、細項" value="${escapeAttr(state.q)}">
     ${extra || ""}
-    <button type="button" class="btn-save" data-export-xlsx>寫回 Excel</button>
+    <button type="button" class="btn-save" data-export-xlsx>📗 寫回 Excel</button>
   </div>`;
 }
 
@@ -1708,8 +1720,29 @@ function chipsToolbar(extra) {
     <div class="chips">${segs.map(s => `<button data-seg="${s}" class="${state.seg === s ? "on" : ""}">${s}</button>`).join("")}</div>
     <input type="search" placeholder="搜尋設備、負責人、細項" value="${escapeAttr(state.q)}">
     ${extra || ""}
-    <button type="button" class="btn-save" data-export-xlsx>寫回 Excel</button>
+    <button type="button" class="btn-save" data-export-xlsx>📗 寫回 Excel</button>
   </div>`;
+}
+
+function applyRouteFromHash() {
+  const h = String(location.hash || "").replace(/^#/, "");
+  if (!h) return false;
+  const m = /(?:^|&)eq=(\d+)/.exec(h);
+  if (!m) return false;
+  const ei = Number(m[1]);
+  if (!Number.isFinite(ei) || ei < 0 || !(DATA.equipment && DATA.equipment[ei])) return false;
+  state.eq = ei;
+  state.tab = "items";
+  state.stage = 0;
+  state.seg = "全部";
+  state.q = "";
+  return true;
+}
+
+function openEqDetailInNewTab(eqIndex) {
+  const url = new URL(location.href);
+  url.hash = "eq=" + eqIndex;
+  window.open(url.toString(), "_blank", "noopener");
 }
 
 const STAGE_BAR_COLORS = ["#e67e22", "#d4a017", "#2e86c1", "#1e8449", "#7d3c98"];
@@ -1881,7 +1914,8 @@ function renderLineGanttHtml() {
       }).join("");
       const title = (eq.seg || "") + " " + (eq.idx || "") + " " + (eq.name || "");
       const nameTxt = ((eq.idx != null && eq.idx !== "" ? eq.idx + " " : "") + (eq.name || "")).trim() || "—";
-      return `<div class="gantt-label ${toneCls}" title="${escapeAttr(title)}">${escapeHtml(nameTxt)}</div>
+      const ei = DATA.equipment.indexOf(eq);
+      return `<div class="gantt-label ${toneCls}" data-gantt-eq="${ei}" title="${escapeAttr(title + "（雙擊開啟細部進度）")}">${escapeHtml(nameTxt)}</div>
         <div class="gantt-meta ${toneCls}"><span class="pct ${pctClass(ratio)}">${pctText(ratio)}</span></div>
         <div class="gantt-meta ${toneCls}"><span class="s-${stName}">${escapeHtml(stName)}</span></div>
         <div class="gantt-meta ${toneCls} ${delays ? "delay-hot" : ""}">${delays}</div>
@@ -2043,7 +2077,7 @@ function renderWeekly() {
     ${chipsToolbar("")}
     <div class="section-head">
       <h2 class="section-title">全部設備｜架線前準備進度</h2>
-      <button type="button" class="btn-add-eq" data-add-eq>新增</button>
+      <button type="button" class="btn-add-eq" data-add-eq>＋ 新增</button>
     </div>
     <div class="m-eq-cards">${mCards}</div>
     <div class="scroll desktop-table"><table class="edit-table">
@@ -2314,7 +2348,7 @@ function renderItems() {
         <div class="mini-bars" style="margin-bottom:10px">${minis}</div>
         <div class="stage-switch">
           ${stageBtns}
-          <button type="button" class="btn-add" data-add-item>新增項目</button>
+          <button type="button" class="btn-add" data-add-item>＋ 新增項目</button>
         </div>
         <div class="m-item-cards">${itemCards}</div>
         <div class="desktop-table"><table class="edit-table">
@@ -3333,7 +3367,17 @@ document.body.addEventListener("click", ev => {
   // 未登入時不處理分頁／資料操作
   if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) return;
   const tab = ev.target.closest("nav.tabs button");
-  if (tab) { state.tab = tab.dataset.tab; render(); return; }
+  if (tab) {
+    state.tab = tab.dataset.tab;
+    if (state.tab !== "items") {
+      // 離開細部時清掉 hash，避免下次重整又跳回
+      if (/^#?eq=/.test(location.hash || "")) {
+        try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+      }
+    }
+    render();
+    return;
+  }
 
   if (ev.target.closest("[data-set-seg-add]")) {
     addSegAt(DATA.segOrder.length, "");
@@ -3736,7 +3780,22 @@ normalizeStructure();
   }
 }
 applyMobileClass();
+applyRouteFromHash();
 render();
+document.body.addEventListener("dblclick", function (ev) {
+  const hit = ev.target.closest("[data-gantt-eq]");
+  if (!hit) return;
+  if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) {
+    toast("請先登入 Google");
+    return;
+  }
+  const ei = Number(hit.dataset.ganttEq);
+  if (!Number.isFinite(ei) || ei < 0 || !DATA.equipment[ei]) return;
+  openEqDetailInNewTab(ei);
+});
+window.addEventListener("hashchange", function () {
+  if (applyRouteFromHash()) render();
+});
 let mobileResizeTimer = null;
 window.addEventListener("resize", function () {
   clearTimeout(mobileResizeTimer);
@@ -3753,6 +3812,7 @@ if (window.LineOneDrive) {
   LineOneDrive.ensureInit().then(() => {
     LineOneDrive.startPresence(function () { updateCloudBar(); });
     updateCloudBar();
+    applyRouteFromHash();
     render();
   }).catch(e => {
     console.warn(e);
