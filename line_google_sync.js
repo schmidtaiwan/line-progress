@@ -98,7 +98,7 @@
     });
   }
 
-  function requestToken(prompt) {
+  function requestToken(prompt, hintEmail) {
     return ensureInit().then(function () {
       return new Promise(function (resolve, reject) {
         tokenClient.callback = function (resp) {
@@ -109,9 +109,16 @@
           state.token = resp.access_token;
           resolve(resp.access_token);
         };
-        tokenClient.requestAccessToken({ prompt: prompt || "" });
+        const req = { prompt: prompt || "" };
+        // 已登入時帶 hint，避免「從雲端載入」又跳出選帳戶
+        if (hintEmail) req.hint = hintEmail;
+        tokenClient.requestAccessToken(req);
       });
     });
+  }
+
+  function accountHint() {
+    return (state.account && (state.account.email || state.account.username)) || "";
   }
 
   function fetchUserEmail(token) {
@@ -127,13 +134,23 @@
     });
   }
 
+  /**
+   * opts.switchAccount = true → 重新登入／換帳（會跳出選帳戶）
+   * 預設只補授權，不強制選帳戶（給首次登入或內部呼叫）
+   */
   function login(opts) {
+    opts = opts || {};
+    const switchAccount = !!opts.switchAccount;
     state.token = "";
-    cachedFolderId = "";
-    saveStoredFileId("");
-    // select_account：可換帳號；consent：首次／換帳時補授權
-    const prompt = (opts && opts.prompt) || "select_account consent";
-    return requestToken(prompt).then(function (tok) {
+    if (switchAccount) {
+      cachedFolderId = "";
+      saveStoredFileId("");
+    }
+    const prompt = switchAccount
+      ? "select_account consent"
+      : (opts.prompt != null ? opts.prompt : "consent");
+    const hint = switchAccount ? "" : (opts.hint || accountHint());
+    return requestToken(prompt, hint).then(function (tok) {
       return fetchUserEmail(tok).then(function (acc) {
         startPresence();
         return acc;
@@ -334,7 +351,9 @@
 
   function getToken() {
     if (state.token) return Promise.resolve(state.token);
-    return requestToken("").then(function (tok) {
+    const hint = accountHint();
+    return requestToken("", hint).then(function (tok) {
+      if (state.account) return tok;
       return fetchUserEmail(tok).then(function () { return tok; });
     });
   }
@@ -529,7 +548,7 @@
       const msg = String(err && err.message || err);
       if (!isScopeError(msg)) throw err;
       state.token = "";
-      return requestToken("consent").then(function () {
+      return requestToken("consent", accountHint()).then(function () {
         return fetchUserEmail(state.token);
       }).then(function () {
         return fn();
@@ -541,7 +560,8 @@
     state.busy = true;
     return ensureInit()
       .then(function () {
-        if (!state.account) return login();
+        // 未登入才登入；不要用 switchAccount，避免載入時又跳選帳戶
+        if (!state.account) return login({ prompt: "consent" });
       })
       .then(function () {
         return withScopeRetry(function () {
