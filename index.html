@@ -953,7 +953,7 @@
   .mile-matrix .pair { display: grid; gap: 6px; }
   .mile-matrix label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
   .date-ctx-menu {
-    position: fixed; z-index: 80; min-width: 132px;
+    position: fixed; z-index: 200; min-width: 148px;
     background: #fff; border: 1px solid var(--line); border-radius: 10px;
     box-shadow: var(--shadow); padding: 4px; display: none;
   }
@@ -1258,9 +1258,9 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
-<script src="xlsx-js-style.min.js?v=25"></script>
-<script src="exceljs.min.js?v=25"></script>
-<script src="export_line_xlsx.js?v=25"></script>
+<script src="xlsx-js-style.min.js?v=26"></script>
+<script src="exceljs.min.js?v=26"></script>
+<script src="export_line_xlsx.js?v=26"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 const STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1279,7 +1279,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 25;
+const PAGE_BUILD = 26;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -2695,6 +2695,28 @@ function hideDateCtxMenu() {
   state.dateCtxTarget = null;
 }
 
+/** 從右鍵目標解析日期欄：含清單列上的「設定日期」按鈕（底層 input 在收合面板內） */
+function resolveDateInputFromEvent(ev) {
+  const direct = ev.target.closest('input[type="date"]');
+  if (direct) return direct;
+  const cell = ev.target.closest(".date-cell");
+  if (cell) {
+    return cell.querySelector('input[type="date"][data-field="due"]')
+      || cell.querySelector('input[type="date"][data-field="start"]')
+      || cell.querySelector('input[type="date"]');
+  }
+  const hit = ev.target.closest(".date-hit, [data-toggle-dates]");
+  if (hit) {
+    const wrap = hit.closest(".date-cell") || hit.parentElement;
+    if (wrap) {
+      return wrap.querySelector('input[type="date"][data-field="due"]')
+        || wrap.querySelector('input[type="date"][data-field="start"]')
+        || wrap.querySelector('input[type="date"]');
+    }
+  }
+  return null;
+}
+
 function showDateCtxMenu(x, y, input) {
   const menu = document.getElementById("dateCtxMenu");
   if (!menu || !input) return;
@@ -3606,7 +3628,7 @@ document.body.addEventListener("click", ev => {
 });
 
 document.body.addEventListener("contextmenu", ev => {
-  const dateInput = ev.target.closest('input[type="date"]');
+  const dateInput = resolveDateInputFromEvent(ev);
   if (dateInput) {
     ev.preventDefault();
     ev.stopPropagation();
@@ -3634,9 +3656,8 @@ document.body.addEventListener("mousedown", ev => {
     runDateCtxAction(kind, input);
     return;
   }
-  if (!ev.target.closest("#dateCtxMenu") && !ev.target.closest('input[type="date"]')) {
-    hideDateCtxMenu();
-  }
+  const onDateUi = ev.target.closest("#dateCtxMenu, input[type='date'], .date-hit, .date-cell, [data-toggle-dates], .date-drop");
+  if (!onDateUi) hideDateCtxMenu();
 }, true);
 
 document.addEventListener("keydown", ev => {
