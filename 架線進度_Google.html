@@ -75,7 +75,9 @@
   header.top .top-right {
     display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
   }
-  header.top .btn-export-top {
+  header.top .top-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+  header.top .btn-export-top,
+  header.top .btn-import-top {
     appearance: none;
     border: 1px solid rgba(255,255,255,0.28);
     background: rgba(255,255,255,0.12);
@@ -87,7 +89,8 @@
     font-weight: 650;
     cursor: pointer;
   }
-  header.top .btn-export-top:hover { background: rgba(255,255,255,0.2); }
+  header.top .btn-export-top:hover,
+  header.top .btn-import-top:hover { background: rgba(255,255,255,0.2); }
   header.top .export-wrap { position: relative; }
   header.top .export-menu {
     display: none;
@@ -893,11 +896,15 @@
     <h1 id="title"></h1>
     <div class="top-right">
       <span class="page-ver" id="pageVer">版次 —</span>
-      <div class="export-wrap">
-        <button type="button" class="btn-export-top" data-export-menu title="匯出到本機">匯出 ▾</button>
-        <div class="export-menu" id="exportMenu">
-          <button type="button" data-export-local="excel">匯出 Excel</button>
-          <button type="button" data-export-local="pdf">匯出 PDF</button>
+      <div class="top-actions">
+        <button type="button" class="btn-import-top" data-import-xlsx title="匯入匯出格式的 Excel">匯入</button>
+        <input type="file" id="importXlsxInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+        <div class="export-wrap">
+          <button type="button" class="btn-export-top" data-export-menu title="匯出到本機">匯出 ▾</button>
+          <div class="export-menu" id="exportMenu">
+            <button type="button" data-export-local="excel">匯出 Excel</button>
+            <button type="button" data-export-local="pdf">匯出 PDF</button>
+          </div>
         </div>
       </div>
     </div>
@@ -960,7 +967,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 9;
+const PAGE_BUILD = 10;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1904,6 +1911,52 @@ function exportLocalExcel() {
   }
 }
 
+function triggerImportXlsx() {
+  if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) {
+    toast("請先登入再匯入");
+    return;
+  }
+  if (typeof importLineFourSheets !== "function" || typeof XLSX === "undefined") {
+    toast("Excel 匯入元件尚未載入，請重新整理後再試");
+    return;
+  }
+  const input = document.getElementById("importXlsxInput");
+  if (!input) return;
+  input.value = "";
+  input.click();
+}
+
+async function handleImportXlsxFile(file) {
+  if (!file) return;
+  const name = String(file.name || "").toLowerCase();
+  if (!name.endsWith(".xlsx")) {
+    toast("請選擇 .xlsx 檔（與匯出格式相同）");
+    return;
+  }
+  try {
+    toast("匯入中…");
+    const buf = await file.arrayBuffer();
+    const parsed = importLineFourSheets(buf, {
+      stageCount: (DATA.stages || []).length || 5,
+      segOrder: DATA.segOrder || [],
+      prevEquipment: DATA.equipment || []
+    });
+    if (!parsed || !Array.isArray(parsed.equipment) || !parsed.equipment.length) {
+      throw new Error("沒有讀到設備資料");
+    }
+    DATA.equipment = parsed.equipment;
+    if (parsed.milestones && parsed.milestones.length) {
+      DATA.milestones = parsed.milestones;
+    }
+    state.eq = Math.min(state.eq, Math.max(0, DATA.equipment.length - 1));
+    saveLocal("已匯入 " + parsed.equipment.length + " 台設備（尚未寫入雲端，請按儲存）");
+    render();
+  } catch (e) {
+    console.error(e);
+    toast("匯入失敗：" + (e && e.message ? e.message : e));
+  }
+}
+
 function exportLocalPdf() {
   const rows = flattenExportRows();
   const title = (DATA && DATA.title) || "Jason追蹤表";
@@ -2170,6 +2223,11 @@ async function cloudPush() {
 }
 
 document.body.addEventListener("click", ev => {
+  if (ev.target.closest("[data-import-xlsx]")) {
+    toggleExportMenu(false);
+    triggerImportXlsx();
+    return;
+  }
   const exportLocal = ev.target.closest("[data-export-local]");
   if (exportLocal) {
     toggleExportMenu(false);
@@ -2419,6 +2477,12 @@ document.body.addEventListener("contextmenu", ev => {
   document.body.addEventListener("touchmove", clearPress, { passive: true });
   document.body.addEventListener("touchcancel", clearPress, { passive: true });
 }
+
+document.getElementById("importXlsxInput")?.addEventListener("change", async (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = "";
+  if (file) await handleImportXlsxFile(file);
+});
 
 document.body.addEventListener("change", async (ev) => {
   const photoInput = ev.target.closest("[data-photo-file]");

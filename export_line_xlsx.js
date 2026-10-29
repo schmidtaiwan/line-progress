@@ -350,5 +350,164 @@
     XLSX.writeFile(wb, filename || ("Jason追蹤表_" + Date.now() + ".xlsx"));
   }
 
+  function cellStr(v) {
+    if (v == null || v === "") return "";
+    if (v instanceof Date) {
+      var y = v.getFullYear();
+      var m = String(v.getMonth() + 1).padStart(2, "0");
+      var d = String(v.getDate()).padStart(2, "0");
+      return y + "/" + m + "/" + d;
+    }
+    if (typeof v === "number" && v > 20000 && v < 80000) {
+      // Excel serial date
+      try {
+        var parsed = XLSX.SSF.parse_date_code(v);
+        if (parsed) {
+          return parsed.y + "/" + String(parsed.m).padStart(2, "0") + "/" + String(parsed.d).padStart(2, "0");
+        }
+      } catch (e) {}
+    }
+    return String(v).trim();
+  }
+
+  function findTrackSheet(wb) {
+    if (wb.Sheets[TRACK]) return wb.Sheets[TRACK];
+    var hit = (wb.SheetNames || []).find(function (n) { return n.indexOf("項目清單") >= 0; });
+    return hit ? wb.Sheets[hit] : null;
+  }
+
+  function findOverviewSheet(wb) {
+    if (wb.Sheets[OVERVIEW]) return wb.Sheets[OVERVIEW];
+    var hit = (wb.SheetNames || []).find(function (n) { return n.indexOf("進度總覽") >= 0; });
+    return hit ? wb.Sheets[hit] : null;
+  }
+
+  function photoMapFromPrev(prevEqList) {
+    var map = {};
+    (prevEqList || []).forEach(function (eq) {
+      (eq.stages || []).forEach(function (st, si) {
+        (st.items || []).forEach(function (it) {
+          if (!it || !Array.isArray(it.photos) || !it.photos.length) return;
+          map[(eq.seg || "") + "|" + (eq.name || "") + "|" + si + "|" + (it.item || "")] = it.photos;
+        });
+      });
+    });
+    return map;
+  }
+
+  /** 解析「架線項目清單管控」矩陣 → equipment[] */
+  function parseTrackSheet(ws, stageCount, prevEquipment) {
+    var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+    if (!aoa.length) throw new Error("清單工作表是空的");
+    var headerRow = -1;
+    for (var r = 0; r < Math.min(10, aoa.length); r++) {
+      var a = cellStr(aoa[r][0]);
+      if (a.indexOf("項次") >= 0 || a.indexOf("🔢") >= 0) {
+        headerRow = r;
+        break;
+      }
+    }
+    if (headerRow < 0) throw new Error("找不到清單表頭列（項次）");
+    var nStages = stageCount || 5;
+    var photos = photoMapFromPrev(prevEquipment);
+    var equipment = [];
+    var cur = null;
+
+    for (var i = headerRow + 1; i < aoa.length; i++) {
+      var row = aoa[i] || [];
+      var name = cellStr(row[2]);
+      var seg = cellStr(row[1]);
+      var idx = row[0];
+      var hasItem = false;
+      for (var si0 = 0; si0 < nStages; si0++) {
+        if (cellStr(row[7 + si0 * 5])) { hasItem = true; break; }
+      }
+      if (name) {
+        cur = {
+          idx: cellStr(idx) || String(equipment.length + 1),
+          seg: seg || (cur && cur.seg) || "",
+          name: name,
+          qty: cellStr(row[3]) || "-",
+          pm: cellStr(row[4]) || "-",
+          owner: cellStr(row[5]) || "-",
+          stages: []
+        };
+        for (var s = 0; s < nStages; s++) {
+          cur.stages.push({ due: "", items: [] });
+        }
+        equipment.push(cur);
+      }
+      if (!cur) continue;
+      if (!hasItem && !name) continue;
+
+      for (var si = 0; si < nStages; si++) {
+        var c0 = 7 + si * 5;
+        var itemName = cellStr(row[c0]);
+        if (!itemName) continue;
+        var pct = asRatio(row[c0 + 1]);
+        var urg = cellStr(row[c0 + 2]) || "中";
+        if (urg.indexOf("高") >= 0) urg = "高";
+        else if (urg.indexOf("低") >= 0) urg = "低";
+        else urg = "中";
+        var due = fmtDue(cellStr(row[c0 + 3]));
+        var status = cellStr(row[c0 + 4]) || "未開始";
+        if (status.indexOf("延誤") >= 0) status = "延誤中";
+        else if (status.indexOf("進行") >= 0) status = "進行中";
+        else if (status.indexOf("完成") >= 0) status = "已完成";
+        else status = "未開始";
+        var key = (cur.seg || "") + "|" + (cur.name || "") + "|" + si + "|" + itemName;
+        var it = {
+          item: itemName,
+          pct: pct,
+          urg: urg,
+          start: "",
+          due: due,
+          actual: "",
+          status: status,
+          note: "",
+          photos: photos[key] ? photos[key].slice() : []
+        };
+        cur.stages[si].items.push(it);
+        if (due && !cur.stages[si].due) cur.stages[si].due = due;
+      }
+    }
+
+    if (!equipment.length) throw new Error("清單中沒有讀到任何設備");
+    return equipment;
+  }
+
+  /** 從總覽表讀各製程段五階段預計完成時間 */
+  function parseMilestones(ws, segOrder, stageCount) {
+    if (!ws) return null;
+    var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+    var out = [];
+    var nStages = stageCount || 5;
+    for (var r = 0; r < aoa.length; r++) {
+      var seg = cellStr(aoa[r][0]);
+      if ((segOrder || []).indexOf(seg) < 0) continue;
+      var dates = [];
+      for (var c = 1; c <= nStages; c++) dates.push(fmtDue(cellStr(aoa[r][c])));
+      if (dates.some(Boolean)) out.push({ seg: seg, dates: dates });
+    }
+    return out.length ? out : null;
+  }
+
+  /**
+   * 讀取匯出格式（或原檔紅框四表）XLSX，回傳 { equipment, milestones }
+   * @param {ArrayBuffer} buffer
+   * @param {object} opts { stageCount, segOrder, prevEquipment }
+   */
+  function importFourSheets(buffer, opts) {
+    if (typeof XLSX === "undefined") throw new Error("缺少 XLSX 函式庫");
+    opts = opts || {};
+    var wb = XLSX.read(buffer, { type: "array", cellDates: true });
+    var track = findTrackSheet(wb);
+    if (!track) throw new Error("找不到「架線項目清單管控」工作表");
+    var equipment = parseTrackSheet(track, opts.stageCount || 5, opts.prevEquipment || []);
+    var milestones = parseMilestones(findOverviewSheet(wb), opts.segOrder || [], opts.stageCount || 5);
+    return { equipment: equipment, milestones: milestones, sheetNames: wb.SheetNames };
+  }
+
   global.exportLineFourSheets = exportFourSheets;
+  global.importLineFourSheets = importFourSheets;
 })(window);
