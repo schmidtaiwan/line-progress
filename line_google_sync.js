@@ -729,6 +729,18 @@
     return "https://drive.google.com/file/d/" + fileId + "/view";
   }
 
+  /** 下載雲端檔為 Blob（供網頁內預覽） */
+  function downloadFileBlob(fileId) {
+    if (!fileId) return Promise.reject(new Error("缺少檔案 ID"));
+    return withScopeRetry(function () {
+      return driveFetch("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?alt=media")
+        .then(function (res) {
+          if (!res.ok) return res.text().then(function (t) { throw new Error("下載照片失敗 " + res.status + " " + t); });
+          return res.blob();
+        });
+    });
+  }
+
   function statusText() {
     if (!(cfg.clientId || "").trim() || String(cfg.clientId).indexOf("PLEASE_") === 0) {
       return "Google：尚未設定 clientId（見 google_config.js）";
@@ -757,6 +769,7 @@
     uploadPhoto: uploadPhoto,
     deleteDriveFile: deleteDriveFile,
     photoViewUrl: photoViewUrl,
+    downloadFileBlob: downloadFileBlob,
     startPresence: startPresence,
     stopPresence: stopPresence,
     presenceTick: presenceTick,
