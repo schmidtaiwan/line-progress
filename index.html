@@ -344,14 +344,6 @@
     font-size: 13pt; line-height: 1.25;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .gantt-label[data-gantt-eq] {
-    cursor: pointer;
-    user-select: none;
-  }
-  .gantt-label[data-gantt-eq]:hover {
-    color: #1a5276;
-    text-decoration: underline;
-  }
   .gantt-label.overall { font-weight: 700; color: #16324a; }
   .gantt-label .sub { display: block; color: var(--muted); font-size: 12pt; font-weight: 400; }
   .gantt-meta {
@@ -1258,9 +1250,9 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
-<script src="xlsx-js-style.min.js?v=26"></script>
-<script src="exceljs.min.js?v=26"></script>
-<script src="export_line_xlsx.js?v=26"></script>
+<script src="xlsx-js-style.min.js?v=27"></script>
+<script src="exceljs.min.js?v=27"></script>
+<script src="export_line_xlsx.js?v=27"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 const STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1279,7 +1271,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 26;
+const PAGE_BUILD = 27;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1760,12 +1752,6 @@ function applyRouteFromHash() {
   return true;
 }
 
-function openEqDetailInNewTab(eqIndex) {
-  const url = new URL(location.href);
-  url.hash = "eq=" + eqIndex;
-  window.open(url.toString(), "_blank", "noopener");
-}
-
 const STAGE_BAR_COLORS = ["#e67e22", "#d4a017", "#2e86c1", "#1e8449", "#7d3c98"];
 const STAGE_BAR_DUR = [10, 5, 5, 5, 5];
 
@@ -1935,8 +1921,7 @@ function renderLineGanttHtml() {
       }).join("");
       const title = (eq.seg || "") + " " + (eq.idx || "") + " " + (eq.name || "");
       const nameTxt = ((eq.idx != null && eq.idx !== "" ? eq.idx + " " : "") + (eq.name || "")).trim() || "—";
-      const ei = DATA.equipment.indexOf(eq);
-      return `<div class="gantt-label ${toneCls}" data-gantt-eq="${ei}" title="${escapeAttr(title + "（雙擊開啟細部進度）")}">${escapeHtml(nameTxt)}</div>
+      return `<div class="gantt-label ${toneCls}" title="${escapeAttr(title)}">${escapeHtml(nameTxt)}</div>
         <div class="gantt-meta ${toneCls}"><span class="pct ${pctClass(ratio)}">${pctText(ratio)}</span></div>
         <div class="gantt-meta ${toneCls}"><span class="s-${stName}">${escapeHtml(stName)}</span></div>
         <div class="gantt-meta ${toneCls} ${delays ? "delay-hot" : ""}">${delays}</div>
@@ -3825,17 +3810,6 @@ normalizeStructure();
 applyMobileClass();
 applyRouteFromHash();
 render();
-document.body.addEventListener("dblclick", function (ev) {
-  const hit = ev.target.closest("[data-gantt-eq]");
-  if (!hit) return;
-  if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) {
-    toast("請先登入 Google");
-    return;
-  }
-  const ei = Number(hit.dataset.ganttEq);
-  if (!Number.isFinite(ei) || ei < 0 || !DATA.equipment[ei]) return;
-  openEqDetailInNewTab(ei);
-});
 window.addEventListener("hashchange", function () {
   if (applyRouteFromHash()) render();
 });
