@@ -20,5 +20,9 @@ window.GOOGLE_CONFIG = {
   fileName: "vivo_r01_line_data.json",
 
   // 項目照片放在 folderPath 底下的此資料夾（不存在會自動建立）
-  photosFolder: "photos"
+  photosFolder: "photos",
+
+  // 歷史快照資料夾（最多 historyMax 筆，超過自動刪最舊）
+  historyFolder: "history",
+  historyMax: 10
 };

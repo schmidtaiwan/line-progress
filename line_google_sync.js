@@ -757,6 +757,133 @@
     return "Google 雲端　｜　未登入（登入後才載入資料）";
   }
 
+  function historyFolderName() {
+    return (cfg.historyFolder || "history").trim() || "history";
+  }
+
+  function historyMax() {
+    const n = Number(cfg.historyMax);
+    return Number.isFinite(n) && n > 0 ? Math.min(50, Math.floor(n)) : 10;
+  }
+
+  function ensureHistoryFolderId() {
+    return ensureFolderId().then(function (parentId) {
+      const name = historyFolderName();
+      return findChildFolder(parentId === "root" ? "root" : parentId, name).then(function (id) {
+        if (id) return id;
+        return createChildFolder(parentId === "root" ? "root" : parentId, name);
+      });
+    });
+  }
+
+  function listHistoryFiles() {
+    return withScopeRetry(function () {
+      return ensureHistoryFolderId().then(function (folderId) {
+        const q = "'" + folderId + "' in parents and trashed=false";
+        return driveFetch(
+          "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
+          "&fields=files(id,name,modifiedTime,size)&pageSize=50&spaces=drive&orderBy=modifiedTime desc"
+        ).then(function (res) {
+          if (!res.ok) return res.text().then(function (t) { throw new Error("讀取歷史清單失敗 " + res.status + " " + t); });
+          return res.json();
+        }).then(function (data) {
+          return (data.files || []).filter(function (f) {
+            return /\.json$/i.test(f.name || "");
+          });
+        });
+      });
+    });
+  }
+
+  function trashDriveFile(fileId) {
+    if (!fileId) return Promise.resolve();
+    return driveFetch("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trashed: true })
+    }).then(function (res) {
+      if (!res.ok && res.status !== 404) {
+        return res.text().then(function (t) { throw new Error("刪除歷史失敗 " + res.status + " " + t); });
+      }
+    });
+  }
+
+  function pruneHistoryFiles(maxKeep) {
+    const keep = maxKeep || historyMax();
+    return listHistoryFiles().then(function (files) {
+      const extra = files.slice(keep);
+      let chain = Promise.resolve();
+      extra.forEach(function (f) {
+        chain = chain.then(function () { return trashDriveFile(f.id); });
+      });
+      return chain.then(function () { return files.slice(0, keep); });
+    });
+  }
+
+  function saveHistoryJson(payload, label) {
+    const stamp = (function () {
+      const d = new Date();
+      const p = function (n) { return String(n).padStart(2, "0"); };
+      return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "_" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+    })();
+    const name = "vivo_r01_hist_" + stamp + ".json";
+    const bodyObj = Object.assign({}, payload || {}, {
+      historySavedAt: new Date().toISOString(),
+      historyLabel: label || ("歷史 " + stamp)
+    });
+    const body = JSON.stringify(bodyObj);
+    state.busy = true;
+    return ensureInit()
+      .then(function () {
+        if (!state.account) return login();
+      })
+      .then(function () {
+        return withScopeRetry(function () {
+          return ensureHistoryFolderId().then(function (folderId) {
+            const meta = { name: name, mimeType: "application/json", parents: [folderId] };
+            return driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name,modifiedTime", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(meta)
+            }).then(function (res) {
+              if (!res.ok) return res.text().then(function (t) { throw new Error("建立歷史檔失敗 " + res.status + " " + t); });
+              return res.json();
+            }).then(function (f) {
+              return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + f.id + "?uploadType=media", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json; charset=utf-8" },
+                body: body
+              }).then(function (res) {
+                if (!res.ok) return res.text().then(function (t) { throw new Error("上傳歷史失敗 " + res.status + " " + t); });
+                return f;
+              });
+            }).then(function (f) {
+              return pruneHistoryFiles(historyMax()).then(function () { return f; });
+            });
+          });
+        });
+      })
+      .finally(function () { state.busy = false; });
+  }
+
+  function loadHistoryJson(fileId) {
+    if (!fileId) return Promise.reject(new Error("缺少歷史檔 ID"));
+    state.busy = true;
+    return ensureInit()
+      .then(function () {
+        if (!state.account) return login({ prompt: "consent" });
+      })
+      .then(function () {
+        return withScopeRetry(function () {
+          return fetchJsonById(fileId).then(function (data) {
+            if (!data) throw new Error("歷史檔是空的或無法解析");
+            return data;
+          });
+        });
+      })
+      .finally(function () { state.busy = false; });
+  }
+
   const api = {
     state: state,
     initMsal: initMsal,
@@ -773,7 +900,11 @@
     startPresence: startPresence,
     stopPresence: stopPresence,
     presenceTick: presenceTick,
-    statusText: statusText
+    statusText: statusText,
+    listHistoryFiles: listHistoryFiles,
+    saveHistoryJson: saveHistoryJson,
+    loadHistoryJson: loadHistoryJson,
+    historyMax: historyMax
   };
 
   global.LineGoogle = api;
