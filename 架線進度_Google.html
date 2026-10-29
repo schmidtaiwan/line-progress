@@ -1250,9 +1250,9 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
-<script src="xlsx-js-style.min.js?v=28"></script>
-<script src="exceljs.min.js?v=28"></script>
-<script src="export_line_xlsx.js?v=28"></script>
+<script src="xlsx-js-style.min.js?v=29"></script>
+<script src="exceljs.min.js?v=29"></script>
+<script src="export_line_xlsx.js?v=29"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 const STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1271,7 +1271,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 28;
+const PAGE_BUILD = 29;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -2247,39 +2247,26 @@ function captureEqListScroll() {
 }
 function restoreEqListScroll(saved) {
   if (!saved) return;
-  const desk = document.querySelector("#items .eq-list");
-  const mob = document.querySelector("#items .m-eq-scroll");
-  if (desk && saved.desk != null) desk.scrollTop = saved.desk;
-  if (mob && saved.mob) {
-    mob.scrollLeft = saved.mob.left || 0;
-    mob.scrollTop = saved.mob.top || 0;
-  }
-  const on = document.querySelector("#items .eq-list button.on, #items .m-eq-scroll button.on");
-  if (on && typeof on.scrollIntoView === "function") {
-    try { on.scrollIntoView({ block: "nearest", inline: "nearest" }); } catch (e) {}
-  }
+  const apply = () => {
+    const desk = document.querySelector("#items .eq-list");
+    const mob = document.querySelector("#items .m-eq-scroll");
+    if (desk && saved.desk != null) desk.scrollTop = saved.desk;
+    if (mob && saved.mob) {
+      mob.scrollLeft = saved.mob.left || 0;
+      mob.scrollTop = saved.mob.top || 0;
+    }
+  };
+  apply();
+  requestAnimationFrame(apply);
 }
 
-function renderItems() {
-  const scrollSave = captureEqListScroll();
-  const list = visibleEq();
-  if (!list.length) {
-    document.getElementById("items").innerHTML = toolbar(`<label><input type="checkbox" id="onlyHigh" ${state.onlyHigh ? "checked" : ""}> 只看高急迫</label>`)
-      + `<p class="note">沒有符合的設備</p>`;
-    return;
-  }
-  if (!list.some(eq => DATA.equipment.indexOf(eq) === state.eq)) {
-    state.eq = DATA.equipment.indexOf(list[0]);
-  }
-  const eq = DATA.equipment[state.eq];
-  const buttons = list.map(item => {
-    const i = DATA.equipment.indexOf(item);
-    const r = ratioOf(item.stages[state.stage].items);
-    return `<button type="button" data-eq="${i}" class="${i === state.eq ? "on" : ""}">
-      <div class="name">${item.idx} ${escapeHtml(item.name)}</div>
-      <div class="sub">${item.seg}　${pctText(r)}　${escapeHtml(item.owner)}</div>
-    </button>`;
-  }).join("");
+function syncEqListHighlight() {
+  document.querySelectorAll("#items [data-eq]").forEach(btn => {
+    btn.classList.toggle("on", Number(btn.dataset.eq) === state.eq);
+  });
+}
+
+function buildItemsDetailHtml(eq) {
   const stageBtns = DATA.stages.map((s, i) =>
     `<button type="button" data-stage="${i}" class="${i === state.stage ? "on" : ""}">${s.name}</button>`
   ).join("");
@@ -2367,12 +2354,7 @@ function renderItems() {
     const r = ratioOf(st.items);
     return `<i title="${pctText(r)}"><b style="width:${Math.round(r * 100)}%"></b></i>`;
   }).join("");
-  document.getElementById("items").innerHTML = `
-    ${toolbar(`<label><input type="checkbox" id="onlyHigh" ${state.onlyHigh ? "checked" : ""}> 只看高急迫</label>`)}
-    <div class="m-eq-scroll m-only">${buttons}</div>
-    <div class="split">
-      <div class="eq-list d-only">${buttons}</div>
-      <div class="detail card">
+  return `<div class="detail card">
         <h2>${eq.idx} ${escapeHtml(eq.name)}</h2>
         <div class="who">${tag(eq.seg)}　數量 ${escapeHtml(eq.qty || "-")}　AMBU PM ${escapeHtml(eq.pm)}　Owner ${escapeHtml(eq.owner)}</div>
         <div class="mini-bars" style="margin-bottom:10px">${minis}</div>
@@ -2389,7 +2371,48 @@ function renderItems() {
           <tbody>${itemRows}</tbody>
         </table></div>
         <p class="note">點細項名稱可展開備註；點「預計完成」可下拉設定預計開始／預計完成／實際完成時間。</p>
-      </div>
+      </div>`;
+}
+
+/** 只換右側明細，不動左側清單 DOM（避免捲動跳回頂端） */
+function refreshItemsDetailOnly() {
+  const eq = DATA.equipment[state.eq];
+  const detail = document.querySelector("#items .detail");
+  if (!eq || !detail) {
+    renderItems();
+    return;
+  }
+  syncEqListHighlight();
+  detail.outerHTML = buildItemsDetailHtml(eq);
+}
+
+function renderItems() {
+  const scrollSave = state._eqListScroll || captureEqListScroll();
+  state._eqListScroll = null;
+  const list = visibleEq();
+  if (!list.length) {
+    document.getElementById("items").innerHTML = toolbar(`<label><input type="checkbox" id="onlyHigh" ${state.onlyHigh ? "checked" : ""}> 只看高急迫</label>`)
+      + `<p class="note">沒有符合的設備</p>`;
+    return;
+  }
+  if (!list.some(eq => DATA.equipment.indexOf(eq) === state.eq)) {
+    state.eq = DATA.equipment.indexOf(list[0]);
+  }
+  const eq = DATA.equipment[state.eq];
+  const buttons = list.map(item => {
+    const i = DATA.equipment.indexOf(item);
+    const r = ratioOf(item.stages[state.stage].items);
+    return `<button type="button" data-eq="${i}" class="${i === state.eq ? "on" : ""}">
+      <div class="name">${item.idx} ${escapeHtml(item.name)}</div>
+      <div class="sub">${item.seg}　${pctText(r)}　${escapeHtml(item.owner)}</div>
+    </button>`;
+  }).join("");
+  document.getElementById("items").innerHTML = `
+    ${toolbar(`<label><input type="checkbox" id="onlyHigh" ${state.onlyHigh ? "checked" : ""}> 只看高急迫</label>`)}
+    <div class="m-eq-scroll m-only">${buttons}</div>
+    <div class="split">
+      <div class="eq-list d-only">${buttons}</div>
+      ${buildItemsDetailHtml(eq)}
     </div>`;
   restoreEqListScroll(scrollSave);
 }
@@ -3484,7 +3507,12 @@ document.body.addEventListener("click", ev => {
     state.stage = Number(stage.dataset.stage);
     state.openRemark = null;
     state.openDates = null;
-    render();
+    if (state.tab === "items" && document.querySelector("#items .detail")) {
+      refreshItemsDetailOnly();
+    } else {
+      state._eqListScroll = captureEqListScroll();
+      render();
+    }
     return;
   }
   const eq = ev.target.closest("[data-eq]");
@@ -3492,7 +3520,13 @@ document.body.addEventListener("click", ev => {
     state.eq = Number(eq.dataset.eq);
     state.openRemark = null;
     state.openDates = null;
-    render();
+    // 清單頁點左側設備：只刷新右側，保留左側捲動位置
+    if (state.tab === "items" && document.querySelector("#items .eq-list, #items .m-eq-scroll")) {
+      refreshItemsDetailOnly();
+    } else {
+      state._eqListScroll = captureEqListScroll();
+      render();
+    }
     return;
   }
   const toggleRemark = ev.target.closest("[data-toggle-remark]");
