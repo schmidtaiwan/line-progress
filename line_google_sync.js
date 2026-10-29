@@ -127,9 +127,13 @@
     });
   }
 
-  function login() {
+  function login(opts) {
     state.token = "";
-    return requestToken("consent").then(function (tok) {
+    cachedFolderId = "";
+    saveStoredFileId("");
+    // select_account：可換帳號；consent：首次／換帳時補授權
+    const prompt = (opts && opts.prompt) || "select_account consent";
+    return requestToken(prompt).then(function (tok) {
       return fetchUserEmail(tok).then(function (acc) {
         startPresence();
         return acc;
@@ -145,6 +149,7 @@
       state.token = "";
       state.account = null;
       state.fileId = "";
+      cachedFolderId = "";
       state.viewers = 0;
       state.viewerList = [];
       notifyViewers();
@@ -606,6 +611,104 @@
     }, delayMs == null ? 1200 : delayMs);
   }
 
+  function photosFolderName() {
+    return (cfg.photosFolder || "photos").trim() || "photos";
+  }
+
+  function ensurePhotosFolderId() {
+    return ensureFolderId().then(function (parentId) {
+      const name = photosFolderName();
+      return findChildFolder(parentId === "root" ? "root" : parentId, name).then(function (id) {
+        if (id) return id;
+        return createChildFolder(parentId === "root" ? "root" : parentId, name);
+      });
+    });
+  }
+
+  function sanitizeFileName(name) {
+    const raw = String(name || "photo.jpg").replace(/[\\/:*?"<>|]/g, "_").trim();
+    return raw || "photo.jpg";
+  }
+
+  /** 上傳圖片到 LineProcess/photos，回傳 { id, name, mimeType, uploadedAt } */
+  function uploadPhoto(file, label) {
+    if (!file) return Promise.reject(new Error("未選擇檔案"));
+    const mime = file.type || "image/jpeg";
+    if (mime && mime.indexOf("image/") !== 0 && mime !== "application/octet-stream") {
+      return Promise.reject(new Error("請選擇圖片檔"));
+    }
+    const base = sanitizeFileName(file.name || "photo.jpg");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const prefix = label ? String(label).replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 40) + "_" : "";
+    const name = prefix + stamp + "_" + base;
+    return ensureInit()
+      .then(function () {
+        if (!state.account) return login();
+      })
+      .then(function () {
+        return withScopeRetry(function () {
+          return ensurePhotosFolderId().then(function (folderId) {
+            const meta = {
+              name: name,
+              mimeType: mime.indexOf("image/") === 0 ? mime : "image/jpeg",
+              parents: [folderId]
+            };
+            const boundary = "----linephoto" + String(Date.now()) + Math.random().toString(16).slice(2);
+            return file.arrayBuffer().then(function (buf) {
+              const metaPart =
+                "--" + boundary + "\r\n" +
+                "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+                JSON.stringify(meta) + "\r\n";
+              const binHead =
+                "--" + boundary + "\r\n" +
+                "Content-Type: " + meta.mimeType + "\r\n\r\n";
+              const tail = "\r\n--" + boundary + "--";
+              const head = new TextEncoder().encode(metaPart + binHead);
+              const end = new TextEncoder().encode(tail);
+              const body = new Uint8Array(head.length + buf.byteLength + end.length);
+              body.set(head, 0);
+              body.set(new Uint8Array(buf), head.length);
+              body.set(end, head.length + buf.byteLength);
+              return driveFetch(
+                "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,webViewLink",
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "multipart/related; boundary=" + boundary },
+                  body: body
+                }
+              ).then(function (res) {
+                if (!res.ok) return res.text().then(function (t) { throw new Error("上傳照片失敗 " + res.status + " " + t); });
+                return res.json();
+              }).then(function (f) {
+                return {
+                  id: f.id,
+                  name: f.name || name,
+                  mimeType: f.mimeType || meta.mimeType,
+                  uploadedAt: new Date().toISOString(),
+                  webViewLink: f.webViewLink || ("https://drive.google.com/file/d/" + f.id + "/view")
+                };
+              });
+            });
+          });
+        });
+      });
+  }
+
+  function deleteDriveFile(fileId) {
+    if (!fileId) return Promise.resolve();
+    return withScopeRetry(function () {
+      return driveFetch("https://www.googleapis.com/drive/v3/files/" + fileId, { method: "DELETE" })
+        .then(function (res) {
+          if (res.status === 404 || res.ok) return;
+          return res.text().then(function (t) { throw new Error("刪除雲端照片失敗 " + res.status + " " + t); });
+        });
+    });
+  }
+
+  function photoViewUrl(fileId) {
+    return "https://drive.google.com/file/d/" + fileId + "/view";
+  }
+
   function statusText() {
     if (!(cfg.clientId || "").trim() || String(cfg.clientId).indexOf("PLEASE_") === 0) {
       return "Google：尚未設定 clientId（見 google_config.js）";
@@ -631,6 +734,9 @@
     downloadJson: downloadJson,
     uploadJson: uploadJson,
     scheduleUpload: scheduleUpload,
+    uploadPhoto: uploadPhoto,
+    deleteDriveFile: deleteDriveFile,
+    photoViewUrl: photoViewUrl,
     startPresence: startPresence,
     stopPresence: stopPresence,
     presenceTick: presenceTick,

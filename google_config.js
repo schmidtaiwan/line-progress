@@ -17,5 +17,8 @@ window.GOOGLE_CONFIG = {
   // 或改用資料夾 ID（有填則忽略 folderPath）
   folderId: "",
 
-  fileName: "vivo_r01_line_data.json"
+  fileName: "vivo_r01_line_data.json",
+
+  // 項目照片放在 folderPath 底下的此資料夾（不存在會自動建立）
+  photosFolder: "photos"
 };

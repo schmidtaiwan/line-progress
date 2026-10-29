@@ -490,6 +490,38 @@
   body.locked header.top p { display: none !important; }
   body.locked header.top .page-ver { display: inline-block !important; }
   body.locked header.top { padding: 10px 28px; min-height: 0; }
+  .btn-photo {
+    border: 1px solid #9ec3e0;
+    background: #f0f7fc;
+    color: #1d6fa5;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-photo:hover { background: #e3f0f9; }
+  .btn-photo.has { background: #1d6fa5; color: #fff; border-color: #1d6fa5; }
+  .photo-cell { white-space: nowrap; }
+  .photo-gallery {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;
+  }
+  .photo-chip {
+    display: flex; flex-direction: column; gap: 6px; width: 112px;
+    border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: #fff;
+  }
+  .photo-chip a {
+    display: block; font-size: 12px; color: #1d6fa5; text-decoration: none;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .photo-chip .thumb {
+    width: 100%; height: 72px; object-fit: cover; border-radius: 6px; background: #edf2f7;
+  }
+  .photo-chip .btn-del {
+    width: 100%; padding: 4px 6px; font-size: 12px;
+  }
+  .photo-input { display: none !important; }
   .btn-del {
     border: 1px solid #e2b8b4;
     background: #fff;
@@ -829,7 +861,7 @@ try {
   if (savedDir === "ltr" || savedDir === "rtl") state.mapDir = savedDir;
 } catch (e) {}
 
-const PAGE_VERSION = "2026-10-29"; // 每次改網頁請更新這行日期
+const PAGE_VERSION = "2026-10-29b"; // 每次改網頁請更新這行日期
 function isMobileView() {
   try {
     if (window.matchMedia && window.matchMedia("(max-width: 900px)").matches) return true;
@@ -1199,7 +1231,7 @@ function defaultStagesFrom(template) {
   }
   return DATA.stages.map(() => ({
     due: "",
-    items: [{ item: "01. 新項目", pct: 0, urg: "中", start: "", due: "", actual: "", status: "未開始", note: "" }]
+    items: [{ item: "01. 新項目", pct: 0, urg: "中", start: "", due: "", actual: "", status: "未開始", note: "", photos: [] }]
   }));
 }
 function nextEqIdx() {
@@ -1309,7 +1341,7 @@ function renderWeekly() {
     <div class="scroll desktop-table"><table>
       <thead><tr>
         <th>排名</th><th>製程段</th><th>設備</th><th>待完成事項</th><th>急迫性</th>
-        <th>完成率</th><th>狀態</th><th>負責人</th><th>預計完成</th>
+        <th>完成率</th><th>狀態</th><th>Owner</th><th>預計完成</th>
       </tr></thead>
       <tbody>${tops.map(t => t.row).join("")}</tbody>
     </table></div>
@@ -1344,6 +1376,33 @@ function renderOverview() {
       <thead><tr><th>項次</th><th>製程段</th><th>設備名稱</th>${head}<th>整體</th><th>延誤數</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="10">沒有符合的設備</td></tr>`}</tbody>
     </table></div>`;
+}
+
+
+function itemPhotos(it) {
+  return Array.isArray(it && it.photos) ? it.photos : [];
+}
+function photoGalleryHtml(it, idx) {
+  const photos = itemPhotos(it);
+  if (!photos.length) return "";
+  const chips = photos.map((p, pi) => {
+    const href = (p && p.webViewLink) || (p && p.id ? ("https://drive.google.com/file/d/" + p.id + "/view") : "#");
+    const name = escapeHtml((p && p.name) || ("照片" + (pi + 1)));
+    return `<div class="photo-chip">
+      <a href="${escapeAttr(href)}" target="_blank" rel="noopener">${name}</a>
+      <button type="button" class="btn-del" data-del-photo="${idx}" data-photo-i="${pi}">刪除照片</button>
+    </div>`;
+  }).join("");
+  return `<div class="photo-gallery" data-photo-gallery="${idx}">${chips}</div>`;
+}
+function photoBtnHtml(it, idx) {
+  const n = itemPhotos(it).length;
+  const cls = "btn-photo" + (n ? " has" : "");
+  const label = n ? ("照片 " + n) : "上傳照片";
+  return `<div class="photo-cell">
+    <button type="button" class="${cls}" data-upload-photo="${idx}" title="上傳照片到 Google 雲端硬碟">${label}</button>
+    <input class="photo-input" type="file" accept="image/*" capture="environment" data-photo-file="${idx}">
+  </div>`;
 }
 
 function renderItems() {
@@ -1400,15 +1459,18 @@ function renderItems() {
         </div>
       </td>
       <td><select class="s-${it.status}" data-field="status">${optionHtml(STATUS_OPTS, it.status || "未開始")}</select></td>
+      <td>${photoBtnHtml(it, idx)}</td>
       <td><button type="button" class="btn-del" data-del-item="${idx}">刪除</button></td>
     </tr>
     <tr class="remark-row ${open ? "" : "hidden"}" data-remark-for="${idx}">
-      <td colspan="7">
+      <td colspan="8">
         <div class="remark-box">
           <label>事項名稱</label>
           <input type="text" data-field="item" data-item-idx="${idx}" value="${escapeAttr(it.item || "")}">
           <label>備註說明</label>
           <textarea data-field="note" data-item-idx="${idx}" placeholder="填寫此細項的備註說明…">${escapeHtml(it.note || "")}</textarea>
+          <label>雲端照片</label>
+          ${photoGalleryHtml(it, idx) || '<p class="note" style="margin:0">尚無照片，按「上傳照片」新增</p>'}
         </div>
       </td>
     </tr>`;
@@ -1430,17 +1492,20 @@ function renderItems() {
         </div>
       </div></div>
       <div class="m-field"><label>狀態</label><select class="s-${it.status}" data-field="status">${optionHtml(STATUS_OPTS, it.status || "未開始")}</select></div>
+      <div class="m-field"><label>照片</label>${photoBtnHtml(it, idx)}</div>
       <div class="remark-box ${open ? "" : "hidden"}" data-remark-for="${idx}">
         <label>事項名稱</label>
         <input type="text" data-field="item" data-item-idx="${idx}" value="${escapeAttr(it.item || "")}">
         <label>備註說明</label>
         <textarea data-field="note" data-item-idx="${idx}" placeholder="填寫此細項的備註說明…">${escapeHtml(it.note || "")}</textarea>
+        <label>雲端照片</label>
+        ${photoGalleryHtml(it, idx) || '<p class="note" style="margin:0">尚無照片</p>'}
       </div>
       <button type="button" class="btn-del" data-del-item="${idx}">刪除項目</button>
     </article>`;
     return { row, card };
   });
-  const itemRows = itemBlocks.map(x => x.row).join("") || `<tr><td colspan="7">此階段沒有符合的細項，可按「新增項目」</td></tr>`;
+  const itemRows = itemBlocks.map(x => x.row).join("") || `<tr><td colspan="8">此階段沒有符合的細項，可按「新增項目」</td></tr>`;
   const itemCards = itemBlocks.map(x => x.card).join("") || `<p class="note">此階段沒有符合的細項，可按「新增項目」</p>`;
   const minis = eq.stages.map(st => {
     const r = ratioOf(st.items);
@@ -1463,7 +1528,7 @@ function renderItems() {
         <div class="desktop-table"><table class="edit-table">
           <thead><tr>
             <th style="min-width:220px">待完成事項</th><th>完成率</th><th></th>
-            <th>急迫性</th><th>預計完成</th><th>狀態</th><th></th>
+            <th>急迫性</th><th>預計完成</th><th>狀態</th><th>照片</th><th></th>
           </tr></thead>
           <tbody>${itemRows}</tbody>
         </table></div>
@@ -1895,7 +1960,8 @@ document.body.addEventListener("click", ev => {
       due: items[0] && items[0].due ? items[0].due : "",
       actual: "",
       status: "未開始",
-      note: ""
+      note: "",
+      photos: []
     });
     syncStageDue(DATA.equipment[state.eq], state.stage);
     state.onlyHigh = false;
@@ -1938,6 +2004,40 @@ document.body.addEventListener("click", ev => {
     }
     return;
   }
+
+  const uploadPhotoBtn = ev.target.closest("[data-upload-photo]");
+  if (uploadPhotoBtn) {
+    const idx = Number(uploadPhotoBtn.dataset.uploadPhoto);
+    const wrap = uploadPhotoBtn.closest(".photo-cell") || uploadPhotoBtn.parentElement;
+    const input = (wrap && wrap.querySelector("[data-photo-file]")) || document.querySelector(`[data-photo-file="${idx}"]`);
+    if (input) input.click();
+    return;
+  }
+  const delPhoto = ev.target.closest("[data-del-photo]");
+  if (delPhoto) {
+    const idx = Number(delPhoto.dataset.delPhoto);
+    const pi = Number(delPhoto.dataset.photoI);
+    const it = DATA.equipment[state.eq].stages[state.stage].items[idx];
+    if (!it || !Array.isArray(it.photos) || !it.photos[pi]) return;
+    const photo = it.photos[pi];
+    if (!confirm("確定刪除此照片？\n" + (photo.name || ""))) return;
+    const finish = () => {
+      it.photos.splice(pi, 1);
+      saveLocal("已刪除照片");
+      render();
+    };
+    if (window.LineOneDrive && photo.id && isCloudLoggedIn()) {
+      toast("正在刪除雲端照片…");
+      LineOneDrive.deleteDriveFile(photo.id).then(finish).catch(e => {
+        console.warn(e);
+        if (confirm("雲端刪除失敗，仍從清單移除？\n" + (e.message || e))) finish();
+      });
+    } else {
+      finish();
+    }
+    return;
+  }
+
   const del = ev.target.closest("[data-del-item]");
   if (del) {
     const idx = Number(del.dataset.delItem);
@@ -1954,7 +2054,46 @@ document.body.addEventListener("click", ev => {
     exportChanges();
   }
 });
+
+document.body.addEventListener("change", async (ev) => {
+  const photoInput = ev.target.closest("[data-photo-file]");
+  if (!photoInput) return;
+  const idx = Number(photoInput.dataset.photoFile);
+  const file = photoInput.files && photoInput.files[0];
+  photoInput.value = "";
+  if (!file) return;
+  if (!window.LineOneDrive || !isCloudLoggedIn()) {
+    toast("請先登入 Google");
+    return;
+  }
+  const eq = DATA.equipment[state.eq];
+  const it = eq.stages[state.stage].items[idx];
+  if (!it) return;
+  try {
+    toast("正在上傳照片…");
+    const label = (eq.idx || "") + "_" + String(it.item || "item").slice(0, 20);
+    const meta = await LineOneDrive.uploadPhoto(file, label);
+    if (!Array.isArray(it.photos)) it.photos = [];
+    it.photos.push(meta);
+    saveLocal("照片已上傳");
+    try {
+      await LineOneDrive.uploadJson(cloudPayload());
+      state.dirty = false;
+      updateCloudBar();
+    } catch (e2) {
+      console.warn(e2);
+      toast("照片已上傳，但進度儲存失敗，請再按「儲存」");
+    }
+    render();
+    toast("照片已上傳到雲端");
+  } catch (e) {
+    console.error(e);
+    toast("上傳失敗：" + (e.message || e));
+  }
+});
+
 document.body.addEventListener("change", ev => {
+
   const el = ev.target;
   if (el.id === "onlyHigh") {
     state.onlyHigh = el.checked;
