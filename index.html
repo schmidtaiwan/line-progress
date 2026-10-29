@@ -256,6 +256,79 @@
     font: inherit;
     background: #fff;
   }
+  .gantt-wrap {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 12px 14px 14px;
+    margin: 0 0 14px;
+  }
+  .gantt-wrap .gantt-head {
+    display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+    gap: 8px; margin-bottom: 10px;
+  }
+  .gantt-wrap .gantt-head h2 { margin: 0; font-size: 16px; }
+  .gantt-wrap .gantt-legend {
+    display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 12px; color: var(--muted);
+  }
+  .gantt-wrap .gantt-legend i {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px;
+    vertical-align: -1px;
+  }
+  .gantt-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .gantt-grid {
+    min-width: 720px;
+    display: grid;
+    grid-template-columns: 168px 1fr;
+    gap: 6px 10px;
+    align-items: center;
+  }
+  .gantt-axis-label { font-size: 12px; color: var(--muted); }
+  .gantt-axis {
+    position: relative; height: 22px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 2px;
+  }
+  .gantt-axis span {
+    position: absolute; top: 0; transform: translateX(-50%);
+    font-size: 11px; color: var(--muted); white-space: nowrap;
+  }
+  .gantt-label {
+    font-size: 12px; line-height: 1.25;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .gantt-label.overall { font-weight: 700; color: #16324a; }
+  .gantt-label .sub { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
+  .gantt-track {
+    position: relative; height: 28px;
+    background: #f3f6f9;
+    border: 1px solid #e6ebf0;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .gantt-track.overall { height: 32px; background: #eef3f8; }
+  .gantt-bar {
+    position: absolute; top: 4px; bottom: 4px;
+    border-radius: 5px; min-width: 3px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+    overflow: hidden;
+  }
+  .gantt-bar .fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: rgba(255,255,255,0.35);
+  }
+  .gantt-bar .txt {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: #fff;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+    pointer-events: none; white-space: nowrap; padding: 0 4px;
+  }
+  .gantt-today {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: #c0392b; opacity: 0.85; z-index: 2; pointer-events: none;
+  }
   .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
   .card {
     background: var(--card);
@@ -1055,7 +1128,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 14;
+const PAGE_BUILD = 15;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1498,6 +1571,157 @@ function toolbar(extra) {
   </div>`;
 }
 
+function chipsToolbar(extra) {
+  const segs = ["全部"].concat(DATA.segOrder);
+  return `<div class="toolbar">
+    <div class="chips">${segs.map(s => `<button data-seg="${s}" class="${state.seg === s ? "on" : ""}">${s}</button>`).join("")}</div>
+    <input type="search" placeholder="搜尋設備、負責人、細項" value="${escapeAttr(state.q)}">
+    ${extra || ""}
+    <button type="button" class="btn-save" data-export-xlsx>寫回 Excel</button>
+  </div>`;
+}
+
+const STAGE_BAR_COLORS = ["#e67e22", "#d4a017", "#2e86c1", "#1e8449", "#7d3c98"];
+const STAGE_BAR_DUR = [10, 5, 5, 5, 5];
+
+function parseDateMs(s) {
+  const iso = normalizeDateValue(s);
+  if (!iso) return null;
+  const t = Date.parse(iso + "T00:00:00");
+  return Number.isNaN(t) ? null : t;
+}
+
+function fmtAxisDate(ms) {
+  const d = new Date(ms);
+  return (d.getMonth() + 1) + "/" + d.getDate();
+}
+
+function stageSpanForEq(eq, si) {
+  const mile = (DATA.milestones || []).find(m => m.seg === eq.seg) || { dates: [], starts: [] };
+  const st = (eq.stages && eq.stages[si]) || {};
+  const items = st.items || [];
+  const itemEnds = items.map(it => parseDateMs(it.due)).filter(Boolean);
+  const itemStarts = items.map(it => parseDateMs(it.start)).filter(Boolean);
+  let end = parseDateMs(st.due) || parseDateMs(mile.dates && mile.dates[si]) || (itemEnds.length ? Math.max.apply(null, itemEnds) : null);
+  let start = parseDateMs(mile.starts && mile.starts[si]) || (itemStarts.length ? Math.min.apply(null, itemStarts) : null);
+  const dur = (STAGE_BAR_DUR[si] || 5) - 1;
+  if (end != null && start == null) start = end - dur * 86400000;
+  if (start != null && end == null) end = start + dur * 86400000;
+  if (start == null || end == null) return null;
+  if (end < start) end = start;
+  return { start, end, pct: ratioOf(items) };
+}
+
+function buildGanttRange(eqList) {
+  let min = null;
+  let max = null;
+  eqList.forEach(eq => {
+    (DATA.stages || []).forEach((_s, si) => {
+      const sp = stageSpanForEq(eq, si);
+      if (!sp) return;
+      if (min == null || sp.start < min) min = sp.start;
+      if (max == null || sp.end > max) max = sp.end;
+    });
+  });
+  if (min == null || max == null) return null;
+  if (max <= min) max = min + 7 * 86400000;
+  // 左右各留 2 天
+  min -= 2 * 86400000;
+  max += 2 * 86400000;
+  return { min, max, span: max - min };
+}
+
+function ganttBarStyle(sp, range, color) {
+  const left = ((sp.start - range.min) / range.span) * 100;
+  const width = Math.max(0.4, ((sp.end - sp.start + 86400000) / range.span) * 100);
+  const pct = Math.max(0, Math.min(100, (sp.pct || 0) * 100));
+  return {
+    left: left.toFixed(3) + "%",
+    width: width.toFixed(3) + "%",
+    color,
+    pct
+  };
+}
+
+function renderLineGanttHtml() {
+  const eqList = visibleEq();
+  const range = buildGanttRange(eqList.length ? eqList : (DATA.equipment || []));
+  const stages = DATA.stages || [];
+  const legend = stages.map((s, i) =>
+    `<span><i style="background:${STAGE_BAR_COLORS[i % STAGE_BAR_COLORS.length]}"></i>${escapeHtml(s.mark || s.name)}</span>`
+  ).join("");
+  if (!range) {
+    return `<section class="gantt-wrap">
+      <div class="gantt-head"><h2>整線進度甘特圖</h2><div class="gantt-legend">${legend}</div></div>
+      <p class="note">尚無可繪製的時程，請到「設定」補各製程段×階段的預計開始／完成。</p>
+    </section>`;
+  }
+  const ticks = 6;
+  const axisMarks = [];
+  for (let i = 0; i <= ticks; i++) {
+    const t = range.min + (range.span * i) / ticks;
+    const left = (i / ticks) * 100;
+    axisMarks.push(`<span style="left:${left}%">${fmtAxisDate(t)}</span>`);
+  }
+  const today = Date.parse(new Date().toISOString().slice(0, 10) + "T00:00:00");
+  let todayHtml = "";
+  if (today >= range.min && today <= range.max) {
+    const left = ((today - range.min) / range.span) * 100;
+    todayHtml = `<div class="gantt-today" style="left:${left}%" title="今天"></div>`;
+  }
+
+  // 整線：各階段取可見設備的最早開始／最晚完成
+  const overallBars = stages.map((s, si) => {
+    let start = null;
+    let end = null;
+    let pctSum = 0;
+    let pctN = 0;
+    eqList.forEach(eq => {
+      const sp = stageSpanForEq(eq, si);
+      if (!sp) return;
+      if (start == null || sp.start < start) start = sp.start;
+      if (end == null || sp.end > end) end = sp.end;
+      pctSum += sp.pct || 0;
+      pctN += 1;
+    });
+    if (start == null || end == null) return "";
+    const st = ganttBarStyle({ start, end, pct: pctN ? pctSum / pctN : 0 }, range, STAGE_BAR_COLORS[si % STAGE_BAR_COLORS.length]);
+    const label = (s.mark || s.name || "").slice(0, 2);
+    return `<div class="gantt-bar" style="left:${st.left};width:${st.width};background:${st.color}" title="${escapeAttr(s.name)} ${st.pct.toFixed(0)}%">
+      <div class="fill" style="width:${st.pct}%"></div>
+      <div class="txt">${escapeHtml(label)} ${st.pct.toFixed(0)}%</div>
+    </div>`;
+  }).join("");
+
+  const eqRows = eqList.map(eq => {
+    const bars = stages.map((s, si) => {
+      const sp = stageSpanForEq(eq, si);
+      if (!sp) return "";
+      const st = ganttBarStyle(sp, range, STAGE_BAR_COLORS[si % STAGE_BAR_COLORS.length]);
+      return `<div class="gantt-bar" style="left:${st.left};width:${st.width};background:${st.color}" title="${escapeAttr(eq.name + "｜" + s.name + "｜" + pctText(sp.pct))}">
+        <div class="fill" style="width:${st.pct}%"></div>
+        <div class="txt">${st.pct.toFixed(0)}%</div>
+      </div>`;
+    }).join("");
+    return `<div class="gantt-label" title="${escapeAttr((eq.idx || "") + " " + (eq.name || ""))}">${escapeHtml(eq.idx || "")} ${escapeHtml(eq.name || "")}<span class="sub">${escapeHtml(eq.seg || "")}</span></div>
+      <div class="gantt-track">${todayHtml}${bars}</div>`;
+  }).join("");
+
+  return `<section class="gantt-wrap">
+    <div class="gantt-head">
+      <h2>整線進度甘特圖</h2>
+      <div class="gantt-legend">${legend}<span>紅線＝今天</span></div>
+    </div>
+    <div class="gantt-scroll"><div class="gantt-grid">
+      <div class="gantt-axis-label">項目</div>
+      <div class="gantt-axis">${axisMarks.join("")}</div>
+      <div class="gantt-label overall">整線（五階段）</div>
+      <div class="gantt-track overall">${todayHtml}${overallBars}</div>
+      ${eqRows || `<div class="gantt-label">—</div><div class="note">沒有符合的設備</div>`}
+    </div></div>
+  </section>`;
+}
+
 function statusSelectValue(items, ratio) {
   if (items.some(it => it.status === "延誤中")) return "延誤中";
   if (items.some(it => it.status === "進行中")) return "進行中";
@@ -1614,7 +1838,9 @@ function renderWeekly() {
   });
   document.getElementById("weekly").innerHTML = `
     <div class="cards">${cards}</div>
-    ${toolbar("")}
+    ${cloudBarHtml()}
+    ${renderLineGanttHtml()}
+    ${chipsToolbar("")}
     <div class="section-head">
       <h2 class="section-title">全部設備｜架線前準備進度</h2>
       <button type="button" class="btn-add-eq" data-add-eq>新增</button>
