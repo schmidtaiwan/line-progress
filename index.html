@@ -1274,9 +1274,9 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
-<script src="xlsx-js-style.min.js?v=32"></script>
-<script src="exceljs.min.js?v=32"></script>
-<script src="export_line_xlsx.js?v=32"></script>
+<script src="xlsx-js-style.min.js?v=33"></script>
+<script src="exceljs.min.js?v=33"></script>
+<script src="export_line_xlsx.js?v=33"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 const STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1295,7 +1295,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 32;
+const PAGE_BUILD = 33;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -2070,6 +2070,53 @@ function renderWeekly() {
       ${barHtml(g.ratio)}
       <div class="meta" style="margin-top:8px"><span>預計完成</span><span>${g.due || "-"}</span></div>
     </article>`).join("");
+  const tops = DATA.segOrder.map((seg, i) => {
+    const hit = DATA.equipment.filter(eq => eq.seg === seg)
+      .flatMap(eq => prepItems(eq).map(it => ({ eq, it })))
+      .find(x => x.it.urg === "高" && x.it.status !== "已完成");
+    if (!hit) {
+      return {
+        row: `<tr><td>TOP ${i + 1}</td><td>${tag(seg)}</td><td colspan="7">此段沒有未完成的高急迫項目</td></tr>`,
+        card: `<article class="m-eq-card"><div class="m-title">TOP ${i + 1}　${seg}</div><p class="note">此段沒有未完成的高急迫項目</p></article>`
+      };
+    }
+    const it = hit.it;
+    return {
+      row: `<tr>
+      <td>TOP ${i + 1}</td><td>${tag(seg)}</td><td>${escapeHtml(hit.eq.name)}</td><td>${escapeHtml(it.item)}</td>
+      <td>${badge("高", "u")}</td><td class="pct ${pctClass(it.pct || 0)}">${pctText(it.pct || 0)}</td>
+      <td>${badge(it.status, "s")}</td><td>${escapeHtml(hit.eq.owner)}</td><td>${it.due || "-"}</td>
+    </tr>`,
+      card: `<article class="m-eq-card">
+        <div class="m-title">TOP ${i + 1}　${escapeHtml(hit.eq.name)}</div>
+        <div class="m-field"><label>製程段</label><div>${tag(seg)}</div></div>
+        <div class="m-field"><label>事項</label><div>${escapeHtml(it.item)}</div></div>
+        <div class="m-field"><label>完成率</label><div class="pct ${pctClass(it.pct || 0)}">${pctText(it.pct || 0)}</div></div>
+        <div class="m-field"><label>狀態</label><div>${badge(it.status, "s")}</div></div>
+        <div class="m-field"><label>負責人</label><div>${escapeHtml(hit.eq.owner)}</div></div>
+        <div class="m-field"><label>預計完成</label><div>${it.due || "-"}</div></div>
+      </article>`
+    };
+  });
+  document.getElementById("weekly").innerHTML = `
+    <div class="cards">${cards}</div>
+    ${cloudBarHtml()}
+    ${renderLineGanttHtml()}
+    ${chipsToolbar("")}
+    <h2 class="section-title">急迫性「高」｜各製程段待處理第一項</h2>
+    <div class="m-eq-cards">${tops.map(t => t.card).join("")}</div>
+    <div class="scroll desktop-table"><table>
+      <thead><tr>
+        <th>排名</th><th>製程段</th><th>設備</th><th>待完成事項</th><th>急迫性</th>
+        <th>完成率</th><th>狀態</th><th>Owner</th><th>預計完成</th>
+      </tr></thead>
+      <tbody>${tops.map(t => t.row).join("")}</tbody>
+    </table></div>
+    <p class="note">設備增刪／改名／改製程段／Owner 等請到「設定」頁維護。完成率請在「工作項目清單」細項更新。${escapeHtml(DATA.note || "")}</p>`;
+}
+
+/** 設備主檔編輯（原周報設定表）→ 供設定頁使用 */
+function buildEquipmentMasterHtml() {
   const eqBlocks = visibleEq().map(eq => {
     const ei = DATA.equipment.indexOf(eq);
     const items = prepItems(eq);
@@ -2105,41 +2152,10 @@ function renderWeekly() {
   });
   const rows = eqBlocks.map(x => x.row).join("");
   const mCards = eqBlocks.map(x => x.card).join("") || `<p class="note">沒有符合的設備，可按「新增」</p>`;
-  const tops = DATA.segOrder.map((seg, i) => {
-    const hit = DATA.equipment.filter(eq => eq.seg === seg)
-      .flatMap(eq => prepItems(eq).map(it => ({ eq, it })))
-      .find(x => x.it.urg === "高" && x.it.status !== "已完成");
-    if (!hit) {
-      return {
-        row: `<tr><td>TOP ${i + 1}</td><td>${tag(seg)}</td><td colspan="7">此段沒有未完成的高急迫項目</td></tr>`,
-        card: `<article class="m-eq-card"><div class="m-title">TOP ${i + 1}　${seg}</div><p class="note">此段沒有未完成的高急迫項目</p></article>`
-      };
-    }
-    const it = hit.it;
-    return {
-      row: `<tr>
-      <td>TOP ${i + 1}</td><td>${tag(seg)}</td><td>${escapeHtml(hit.eq.name)}</td><td>${escapeHtml(it.item)}</td>
-      <td>${badge("高", "u")}</td><td class="pct ${pctClass(it.pct || 0)}">${pctText(it.pct || 0)}</td>
-      <td>${badge(it.status, "s")}</td><td>${escapeHtml(hit.eq.owner)}</td><td>${it.due || "-"}</td>
-    </tr>`,
-      card: `<article class="m-eq-card">
-        <div class="m-title">TOP ${i + 1}　${escapeHtml(hit.eq.name)}</div>
-        <div class="m-field"><label>製程段</label><div>${tag(seg)}</div></div>
-        <div class="m-field"><label>事項</label><div>${escapeHtml(it.item)}</div></div>
-        <div class="m-field"><label>完成率</label><div class="pct ${pctClass(it.pct || 0)}">${pctText(it.pct || 0)}</div></div>
-        <div class="m-field"><label>狀態</label><div>${badge(it.status, "s")}</div></div>
-        <div class="m-field"><label>負責人</label><div>${escapeHtml(hit.eq.owner)}</div></div>
-        <div class="m-field"><label>預計完成</label><div>${it.due || "-"}</div></div>
-      </article>`
-    };
-  });
-  document.getElementById("weekly").innerHTML = `
-    <div class="cards">${cards}</div>
-    ${cloudBarHtml()}
-    ${renderLineGanttHtml()}
+  return `
     ${chipsToolbar("")}
     <div class="section-head">
-      <h2 class="section-title">全部設備｜架線前準備進度</h2>
+      <h2 class="section-title">全部設備｜主檔維護</h2>
       <button type="button" class="btn-add-eq icon-only" data-add-eq title="新增設備" aria-label="新增設備">＋</button>
     </div>
     <div class="m-eq-cards">${mCards}</div>
@@ -2150,16 +2166,7 @@ function renderWeekly() {
       </tr></thead>
       <tbody>${rows || `<tr><td colspan="11">沒有符合的設備，可按「新增」</td></tr>`}</tbody>
     </table></div>
-    <h2 class="section-title">急迫性「高」｜各製程段待處理第一項</h2>
-    <div class="m-eq-cards">${tops.map(t => t.card).join("")}</div>
-    <div class="scroll desktop-table"><table>
-      <thead><tr>
-        <th>排名</th><th>製程段</th><th>設備</th><th>待完成事項</th><th>急迫性</th>
-        <th>完成率</th><th>狀態</th><th>Owner</th><th>預計完成</th>
-      </tr></thead>
-      <tbody>${tops.map(t => t.row).join("")}</tbody>
-    </table></div>
-    <p class="note">此表可直接改設備名稱、數量、完成率、日期、狀態、Owner；完成率／狀態會套用到該設備「架線前準備」細項。${escapeHtml(DATA.note || "")}</p>`;
+    <p class="note">可改項次、製程段、名稱、數量、完成率、日期、狀態、Owner；右鍵可複製／貼上設備。完成率／狀態會套用到該設備「架線前準備」細項。</p>`;
 }
 
 function renderOverview() {
@@ -2659,11 +2666,16 @@ function renderSettings() {
   }).join("");
   document.getElementById("settings").innerHTML = `
     ${cloudBarHtml()}
-    <p class="note">此頁可維護上方製程段篩選、下方五階段名稱，以及各製程段×階段的預計開始／完成時間。變更會寫入本機；要同步雲端請按「儲存」。</p>
+    <p class="note">此頁維護設備主檔、製程段、五階段、適用階段勾選，以及各製程段×階段時程。變更寫入本機；要同步雲端請按「儲存」。</p>
     <div class="settings-grid">
+      <section class="settings-panel full">
+        <h2>設備主檔</h2>
+        <p class="hint">原「架線周報」內的設備設定表已移至此。可新增／刪除／改名／改製程段；列上右鍵可複製、貼上設備。</p>
+        ${buildEquipmentMasterHtml()}
+      </section>
       <section class="settings-panel">
         <h2>設備製程段</h2>
-        <p class="hint">對應上方紅框：全部／板階段／組裝段／測試段…可新增、刪除、插入、重新命名與排序。</p>
+        <p class="hint">對應篩選列：全部／板階段／組裝段／測試段…可新增、刪除、插入、重新命名與排序。</p>
         <div class="set-toolbar">
           <button type="button" data-set-seg-add>＋ 新增製程段</button>
         </div>
@@ -2671,7 +2683,7 @@ function renderSettings() {
       </section>
       <section class="settings-panel">
         <h2>架線階段</h2>
-        <p class="hint">對應清單頁下方紅框階段按鈕；可增刪插改與排序。簡稱用於 KPI 延誤拆解顯示。</p>
+        <p class="hint">對應清單頁階段按鈕；可增刪插改與排序。簡稱用於 KPI 延誤拆解顯示。</p>
         <div class="set-toolbar">
           <button type="button" data-set-stage-add>＋ 新增階段</button>
         </div>
