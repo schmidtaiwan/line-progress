@@ -925,6 +925,17 @@
   .settings-panel h2 { margin: 0 0 6px; font-size: 17px; }
   .settings-panel .hint { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
   .settings-panel.full { grid-column: 1 / -1; }
+  .stage-on-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .stage-on-table th, .stage-on-table td {
+    border: 1px solid var(--line);
+    padding: 6px 8px;
+    text-align: center;
+    vertical-align: middle;
+  }
+  .stage-on-table th { background: #f4f7fa; font-weight: 650; white-space: nowrap; }
+  .stage-on-table td.eq-name { text-align: left; white-space: nowrap; min-width: 140px; }
+  .stage-on-table td.eq-name .sub { color: var(--muted); font-size: 12px; }
+  .stage-on-table input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
   .set-row {
     display: grid; gap: 8px; align-items: center;
     padding: 10px 0; border-bottom: 1px solid #eef2f6;
@@ -1259,9 +1270,9 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
-<script src="xlsx-js-style.min.js?v=30"></script>
-<script src="exceljs.min.js?v=30"></script>
-<script src="export_line_xlsx.js?v=30"></script>
+<script src="xlsx-js-style.min.js?v=31"></script>
+<script src="exceljs.min.js?v=31"></script>
+<script src="export_line_xlsx.js?v=31"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 const STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1280,7 +1291,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 30;
+const PAGE_BUILD = 31;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1467,9 +1478,40 @@ function normalizeStructure() {
       if (!st || typeof st !== "object") eq.stages[si] = blankStageBlock("");
       if (!Array.isArray(eq.stages[si].items)) eq.stages[si].items = blankStageBlock("").items;
     });
+    ensureStageOn(eq);
   });
   if (state.stage >= n) state.stage = Math.max(0, n - 1);
   if (state.seg !== "全部" && !DATA.segOrder.includes(state.seg)) state.seg = "全部";
+  ensureActiveStageForEq(DATA.equipment[state.eq]);
+}
+
+/** 各設備勾選的適用階段；缺省＝全選（true） */
+function ensureStageOn(eq) {
+  if (!eq) return;
+  const n = (DATA.stages || []).length;
+  if (!Array.isArray(eq.stageOn)) eq.stageOn = [];
+  while (eq.stageOn.length < n) eq.stageOn.push(true);
+  if (eq.stageOn.length > n) eq.stageOn = eq.stageOn.slice(0, n);
+  eq.stageOn = eq.stageOn.map(v => v !== false);
+  if (!eq.stageOn.some(Boolean) && n) eq.stageOn[0] = true;
+}
+function isStageOn(eq, si) {
+  if (!eq) return true;
+  ensureStageOn(eq);
+  return eq.stageOn[si] !== false;
+}
+function enabledStageIndexes(eq) {
+  return (DATA.stages || []).map((_s, i) => i).filter(i => isStageOn(eq, i));
+}
+function activeItemsOf(eq) {
+  if (!eq || !Array.isArray(eq.stages)) return [];
+  return eq.stages.flatMap((st, si) => (isStageOn(eq, si) ? (st.items || []) : []));
+}
+function ensureActiveStageForEq(eq) {
+  if (!eq || !(DATA.stages || []).length) return;
+  if (isStageOn(eq, state.stage)) return;
+  const first = enabledStageIndexes(eq)[0];
+  if (first != null) state.stage = first;
 }
 /** 誤刪還原：前 4 台設備 + 送板機架線前準備 01~04 */
 function restoreAccidentalDeletes() {
@@ -1639,7 +1681,7 @@ function highOpen(items) {
   return items.filter(it => it.urg === "高" && it.status !== "已完成").length;
 }
 function delayCount(eq) {
-  return eq.stages.reduce((n, st) => n + st.items.filter(it => it.status === "延誤中").length, 0);
+  return activeItemsOf(eq).filter(it => it.status === "延誤中").length;
 }
 function matchQuery(eq) {
   const q = state.q.trim().toLowerCase();
@@ -1694,6 +1736,7 @@ function stageDelayCounts() {
   const counts = (DATA.stages || []).map((st, si) => {
     let n = 0;
     (DATA.equipment || []).forEach(eq => {
+      if (!isStageOn(eq, si)) return;
       const items = eq.stages && eq.stages[si] && eq.stages[si].items;
       if (!items) return;
       n += items.filter(it => it.status === "延誤中").length;
@@ -1777,6 +1820,7 @@ function fmtAxisDate(ms) {
 }
 
 function stageSpanForEq(eq, si) {
+  if (!isStageOn(eq, si)) return null;
   const mile = (DATA.milestones || []).find(m => m.seg === eq.seg) || { dates: [], starts: [] };
   const st = (eq.stages && eq.stages[si]) || {};
   const items = st.items || [];
@@ -1894,7 +1938,6 @@ function renderLineGanttHtml() {
     </div>`;
   }).join("");
 
-  const allItemsOf = eq => (eq.stages || []).flatMap(st => st.items || []);
   let overallPctSum = 0;
   let overallPctN = 0;
   let overallDelay = 0;
@@ -1911,7 +1954,7 @@ function renderLineGanttHtml() {
     const railTone = gi % 2 === 0 ? "" : " tone-b";
     const rail = `<div class="gantt-seg-rail${railTone}" style="grid-row: span ${grp.eqs.length}" title="${escapeAttr(grp.seg)}">${escapeHtml(grp.seg || "—")}</div>`;
     const rows = grp.eqs.map((eq, ri) => {
-      const items = allItemsOf(eq);
+      const items = activeItemsOf(eq);
       const ratio = ratioOf(items);
       const stName = statusSelectValue(items, ratio);
       const delays = delayCount(eq);
@@ -1930,7 +1973,8 @@ function renderLineGanttHtml() {
       }).join("");
       const title = (eq.seg || "") + " " + (eq.idx || "") + " " + (eq.name || "");
       const nameTxt = ((eq.idx != null && eq.idx !== "" ? eq.idx + " " : "") + (eq.name || "")).trim() || "—";
-      return `<div class="gantt-label ${toneCls}" title="${escapeAttr(title)}">${escapeHtml(nameTxt)}</div>
+      const onMarks = enabledStageIndexes(eq).map(i => (stages[i] && (stages[i].mark || stages[i].name)) || "").filter(Boolean).join("、");
+      return `<div class="gantt-label ${toneCls}" title="${escapeAttr(title + (onMarks ? "｜階段：" + onMarks : ""))}">${escapeHtml(nameTxt)}</div>
         <div class="gantt-meta ${toneCls}"><span class="pct ${pctClass(ratio)}">${pctText(ratio)}</span></div>
         <div class="gantt-meta ${toneCls}"><span class="s-${stName}">${escapeHtml(stName)}</span></div>
         <div class="gantt-meta ${toneCls} ${delays ? "delay-hot" : ""}">${delays}</div>
@@ -1942,7 +1986,7 @@ function renderLineGanttHtml() {
 
   const overallRatio = overallPctN ? overallPctSum / overallPctN : 0;
   const overallStatus = statusSelectValue(
-    eqList.flatMap(allItemsOf),
+    eqList.flatMap(activeItemsOf),
     overallRatio
   );
 
@@ -2129,11 +2173,14 @@ function renderOverview() {
     })
     .join("");
   const rows = visibleEq().map(eq => {
-    const cells = eq.stages.map(st => {
+    const cells = eq.stages.map((st, si) => {
+      if (!isStageOn(eq, si)) {
+        return `<td style="min-width:92px"><div class="note">不適用</div></td>`;
+      }
       const r = ratioOf(st.items);
       return `<td style="min-width:92px"><div class="pct ${pctClass(r)}">${pctText(r)}</div>${barHtml(r)}<div class="note">${st.due || ""}</div></td>`;
     }).join("");
-    const overall = ratioOf(eq.stages.flatMap(st => st.items));
+    const overall = ratioOf(activeItemsOf(eq));
     return `<tr>
       <td>${eq.idx}</td><td>${tag(eq.seg)}</td><td>${eq.name}</td>
       ${cells}
@@ -2287,6 +2334,7 @@ function selectEquipment(ei, opts) {
   state.eq = Number(ei);
   state.openRemark = null;
   state.openDates = null;
+  ensureActiveStageForEq(DATA.equipment[state.eq]);
   const preferDetail = !opts || opts.detailOnly !== false;
   if (preferDetail && state.tab === "items" && document.querySelector("#items .eq-list, #items .m-eq-scroll")) {
     refreshItemsDetailOnly(scrollSave);
@@ -2298,9 +2346,11 @@ function selectEquipment(ei, opts) {
 }
 
 function buildItemsDetailHtml(eq) {
-  const stageBtns = DATA.stages.map((s, i) =>
-    `<button type="button" data-stage="${i}" class="${i === state.stage ? "on" : ""}">${s.name}</button>`
-  ).join("");
+  ensureActiveStageForEq(eq);
+  const stageBtns = DATA.stages.map((s, i) => {
+    if (!isStageOn(eq, i)) return "";
+    return `<button type="button" data-stage="${i}" class="${i === state.stage ? "on" : ""}">${s.name}</button>`;
+  }).join("");
   const allItems = eq.stages[state.stage].items;
   const shown = allItems
     .map((it, idx) => ({ it, idx }))
@@ -2381,9 +2431,11 @@ function buildItemsDetailHtml(eq) {
   });
   const itemRows = itemBlocks.map(x => x.row).join("") || `<tr><td colspan="8">此階段沒有符合的細項，可按「新增項目」</td></tr>`;
   const itemCards = itemBlocks.map(x => x.card).join("") || `<p class="note">此階段沒有符合的細項，可按「新增項目」</p>`;
-  const minis = eq.stages.map(st => {
+  const minis = eq.stages.map((st, si) => {
+    if (!isStageOn(eq, si)) return "";
     const r = ratioOf(st.items);
-    return `<i title="${pctText(r)}"><b style="width:${Math.round(r * 100)}%"></b></i>`;
+    const label = (DATA.stages[si] && (DATA.stages[si].mark || DATA.stages[si].name)) || "";
+    return `<i title="${escapeAttr(label + " " + pctText(r))}"><b style="width:${Math.round(r * 100)}%"></b></i>`;
   }).join("");
   return `<div class="detail card">
         <h2>${eq.idx} ${escapeHtml(eq.name)}</h2>
@@ -2440,9 +2492,11 @@ function renderItems() {
     state.eq = DATA.equipment.indexOf(list[0]);
   }
   const eq = DATA.equipment[state.eq];
+  ensureActiveStageForEq(eq);
   const buttons = list.map(item => {
     const i = DATA.equipment.indexOf(item);
-    const r = ratioOf(item.stages[state.stage].items);
+    const si = isStageOn(item, state.stage) ? state.stage : (enabledStageIndexes(item)[0] ?? 0);
+    const r = ratioOf((item.stages[si] && item.stages[si].items) || []);
     return `<button type="button" data-eq="${i}" class="${i === state.eq ? "on" : ""}" tabindex="-1">
       <div class="name">${item.idx} ${escapeHtml(item.name)}</div>
       <div class="sub">${item.seg}　${pctText(r)}　${escapeHtml(item.owner)}</div>
@@ -2585,6 +2639,20 @@ function renderSettings() {
     }).join("");
     return `<tr><th>${escapeHtml(m.seg)}</th>${cells}</tr>`;
   }).join("");
+  const stageOnHead = DATA.stages.map(s =>
+    `<th title="${escapeAttr(s.name)}">${escapeHtml(s.mark || s.name)}</th>`
+  ).join("");
+  const stageOnBody = (DATA.equipment || []).map((eq, ei) => {
+    ensureStageOn(eq);
+    const cells = DATA.stages.map((s, si) =>
+      `<td><input type="checkbox" data-eq-stage-on="${ei}" data-stage-i="${si}" ${eq.stageOn[si] ? "checked" : ""} title="${escapeAttr((eq.name || "") + "｜" + s.name)}"></td>`
+    ).join("");
+    const label = ((eq.idx != null && eq.idx !== "" ? eq.idx + " " : "") + (eq.name || "")).trim() || ("設備 " + (ei + 1));
+    return `<tr>
+      <td class="eq-name"><div>${escapeHtml(label)}</div><div class="sub">${escapeHtml(eq.seg || "")}</div></td>
+      ${cells}
+    </tr>`;
+  }).join("");
   document.getElementById("settings").innerHTML = `
     ${cloudBarHtml()}
     <p class="note">此頁可維護上方製程段篩選、下方五階段名稱，以及各製程段×階段的預計開始／完成時間。變更會寫入本機；要同步雲端請按「儲存」。</p>
@@ -2604,6 +2672,14 @@ function renderSettings() {
           <button type="button" data-set-stage-add>＋ 新增階段</button>
         </div>
         ${stageRows || `<p class="note">尚無階段</p>`}
+      </section>
+      <section class="settings-panel full">
+        <h2>各設備適用階段</h2>
+        <p class="hint">預設全選。例如送板機可只勾「架線前準備」「架機」；甘特圖與清單頁只顯示已勾階段。至少保留一個。</p>
+        <div class="scroll"><table class="stage-on-table">
+          <thead><tr><th>設備</th>${stageOnHead}</tr></thead>
+          <tbody>${stageOnBody || `<tr><td colspan="${1 + DATA.stages.length}">尚無設備</td></tr>`}</tbody>
+        </table></div>
       </section>
       <section class="settings-panel full">
         <h2>各製程段 × 階段時程</h2>
@@ -2673,6 +2749,8 @@ function addStageAt(index, name) {
   DATA.equipment.forEach(eq => {
     if (!Array.isArray(eq.stages)) eq.stages = [];
     eq.stages.splice(i, 0, blankStageBlock(""));
+    ensureStageOn(eq);
+    eq.stageOn.splice(i, 0, true);
   });
   DATA.milestones.forEach(m => {
     if (!Array.isArray(m.dates)) m.dates = [];
@@ -2693,6 +2771,7 @@ function deleteStageAt(index) {
   DATA.stages.splice(index, 1);
   DATA.equipment.forEach(eq => {
     if (Array.isArray(eq.stages)) eq.stages.splice(index, 1);
+    if (Array.isArray(eq.stageOn)) eq.stageOn.splice(index, 1);
   });
   DATA.milestones.forEach(m => {
     if (Array.isArray(m.dates)) m.dates.splice(index, 1);
@@ -2706,6 +2785,7 @@ function moveStage(from, to) {
   if (!swapArr(DATA.stages, from, to)) return;
   DATA.equipment.forEach(eq => {
     if (Array.isArray(eq.stages)) swapArr(eq.stages, from, to);
+    if (Array.isArray(eq.stageOn)) swapArr(eq.stageOn, from, to);
   });
   DATA.milestones.forEach(m => {
     if (Array.isArray(m.dates)) swapArr(m.dates, from, to);
@@ -3316,9 +3396,11 @@ function patchItemField(itemIdx, field, raw) {
   });
   const minis = document.querySelector(".mini-bars");
   if (minis) {
-    minis.innerHTML = eq.stages.map(st => {
+    minis.innerHTML = eq.stages.map((st, si) => {
+      if (!isStageOn(eq, si)) return "";
       const r = ratioOf(st.items);
-      return `<i title="${pctText(r)}"><b style="width:${Math.round(r * 100)}%"></b></i>`;
+      const label = (DATA.stages[si] && (DATA.stages[si].mark || DATA.stages[si].name)) || "";
+      return `<i title="${escapeAttr(label + " " + pctText(r))}"><b style="width:${Math.round(r * 100)}%"></b></i>`;
     }).join("");
   }
 }
@@ -3639,7 +3721,8 @@ document.body.addEventListener("click", ev => {
       pm: template ? template.pm : "-",
       owner: "-",
       startRow: null,
-      stages: defaultStagesFrom(template)
+      stages: defaultStagesFrom(template),
+      stageOn: (DATA.stages || []).map(() => true)
     };
     DATA.equipment.push(neu);
     state.eq = DATA.equipment.length - 1;
@@ -3849,6 +3932,23 @@ document.body.addEventListener("change", ev => {
   if (el.id === "onlyHigh") {
     state.onlyHigh = el.checked;
     render();
+    return;
+  }
+  if (el.hasAttribute("data-eq-stage-on")) {
+    const ei = Number(el.getAttribute("data-eq-stage-on"));
+    const si = Number(el.getAttribute("data-stage-i"));
+    const eq = DATA.equipment[ei];
+    if (!eq || !Number.isFinite(si)) return;
+    ensureStageOn(eq);
+    const next = !!el.checked;
+    if (!next && eq.stageOn.filter(Boolean).length <= 1 && eq.stageOn[si]) {
+      el.checked = true;
+      toast("至少保留一個適用階段");
+      return;
+    }
+    eq.stageOn[si] = next;
+    if (ei === state.eq) ensureActiveStageForEq(eq);
+    saveLocal("已更新設備適用階段");
     return;
   }
   const segNameInput = el.closest("[data-set-seg-i]") && el.matches("[data-set-seg-name]");
