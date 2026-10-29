@@ -1249,6 +1249,10 @@
   <button type="button" data-date-ctx="paste">貼上日期</button>
   <button type="button" data-date-ctx="clear">清除日期</button>
 </div>
+<div class="date-ctx-menu" id="eqCtxMenu" role="menu">
+  <button type="button" data-eq-ctx="copy">複製設備</button>
+  <button type="button" data-eq-ctx="paste">貼上設備</button>
+</div>
 <div class="photo-preview-mask" id="photoPreviewMask" role="dialog" aria-modal="true" aria-label="照片預覽">
   <div class="photo-preview-box">
     <div class="photo-preview-head">
@@ -1270,9 +1274,9 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
-<script src="xlsx-js-style.min.js?v=31"></script>
-<script src="exceljs.min.js?v=31"></script>
-<script src="export_line_xlsx.js?v=31"></script>
+<script src="xlsx-js-style.min.js?v=32"></script>
+<script src="exceljs.min.js?v=32"></script>
+<script src="export_line_xlsx.js?v=32"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 const STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1280,7 +1284,7 @@ const URG_OPTS = ["高", "中", "低"];
 const STATUS_OPTS = ["未開始", "進行中", "延誤中", "已完成"];
 const REQUIRE_CLOUD_LOGIN = true;
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1291,7 +1295,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 31;
+const PAGE_BUILD = 32;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -2849,6 +2853,127 @@ function hideDateCtxMenu() {
   state.dateCtxTarget = null;
 }
 
+const EQ_CLIP_KEY = STORE_KEY + "_eq_clip";
+
+function hideEqCtxMenu() {
+  const menu = document.getElementById("eqCtxMenu");
+  if (menu) menu.classList.remove("show");
+  state.eqCtxTarget = null;
+}
+
+function readEqClipboard() {
+  if (state.eqClipboard && state.eqClipboard.name != null) return state.eqClipboard;
+  try {
+    const raw = sessionStorage.getItem(EQ_CLIP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      state.eqClipboard = parsed;
+      return parsed;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function writeEqClipboard(eq) {
+  if (!eq) {
+    state.eqClipboard = null;
+    try { sessionStorage.removeItem(EQ_CLIP_KEY); } catch (e) {}
+    return null;
+  }
+  const payload = clone(eq);
+  state.eqClipboard = payload;
+  try { sessionStorage.setItem(EQ_CLIP_KEY, JSON.stringify(payload)); } catch (e) {}
+  return payload;
+}
+
+function resolveEqIndexFromEvent(ev) {
+  const btn = ev.target.closest("#items [data-eq], .m-eq-scroll [data-eq]");
+  if (btn && btn.dataset.eq != null) return Number(btn.dataset.eq);
+  const row = ev.target.closest("[data-eq-idx]");
+  if (row && row.dataset.eqIdx != null) return Number(row.dataset.eqIdx);
+  return null;
+}
+
+function positionCtxMenu(menu, x, y) {
+  if (!menu) return;
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+  menu.classList.add("show");
+  const pad = 8;
+  const rect = menu.getBoundingClientRect();
+  let left = x;
+  let top = y;
+  if (left + rect.width > window.innerWidth - pad) left = window.innerWidth - rect.width - pad;
+  if (top + rect.height > window.innerHeight - pad) top = window.innerHeight - rect.height - pad;
+  menu.style.left = Math.max(pad, left) + "px";
+  menu.style.top = Math.max(pad, top) + "px";
+}
+
+function showEqCtxMenu(x, y, eqIdx) {
+  const menu = document.getElementById("eqCtxMenu");
+  if (!menu || !Number.isFinite(eqIdx) || !DATA.equipment[eqIdx]) return;
+  hideDateCtxMenu();
+  state.eqCtxTarget = eqIdx;
+  const clip = readEqClipboard();
+  const pasteBtn = menu.querySelector('[data-eq-ctx="paste"]');
+  const copyBtn = menu.querySelector('[data-eq-ctx="copy"]');
+  if (pasteBtn) {
+    pasteBtn.disabled = !clip;
+    pasteBtn.style.opacity = clip ? "1" : "0.55";
+    pasteBtn.title = clip
+      ? ("貼上「" + (clip.idx ? clip.idx + " " : "") + (clip.name || "設備") + "」")
+      : "尚無已複製設備";
+  }
+  if (copyBtn) {
+    const eq = DATA.equipment[eqIdx];
+    copyBtn.disabled = false;
+    copyBtn.title = "複製「" + ((eq.idx ? eq.idx + " " : "") + (eq.name || "設備")) + "」";
+  }
+  positionCtxMenu(menu, x, y);
+}
+
+function copyEquipmentAt(eqIdx) {
+  const eq = DATA.equipment[eqIdx];
+  if (!eq) {
+    toast("找不到要複製的設備");
+    return false;
+  }
+  writeEqClipboard(eq);
+  toast("已複製「" + ((eq.idx ? eq.idx + " " : "") + (eq.name || "設備")) + "」（可右鍵貼上）");
+  return true;
+}
+
+function pasteEquipmentAfter(afterIdx) {
+  const clip = readEqClipboard();
+  if (!clip) {
+    toast("尚無已複製設備，請先右鍵「複製設備」");
+    return false;
+  }
+  const neu = clone(clip);
+  neu.idx = nextEqIdx();
+  neu.startRow = null;
+  if (!Array.isArray(neu.stages)) neu.stages = defaultStagesFrom(clip);
+  ensureStageOn(neu);
+  const insertAt = Number.isFinite(afterIdx)
+    ? Math.max(0, Math.min(afterIdx + 1, DATA.equipment.length))
+    : DATA.equipment.length;
+  DATA.equipment.splice(insertAt, 0, neu);
+  normalizeStructure();
+  state.eq = insertAt;
+  state.openRemark = null;
+  state.openDates = null;
+  ensureActiveStageForEq(neu);
+  saveLocal("已貼上設備「" + ((neu.idx ? neu.idx + " " : "") + (neu.name || "")) + "」");
+  render();
+  return true;
+}
+
+function runEqCtxAction(kind, eqIdx) {
+  if (kind === "copy") copyEquipmentAt(eqIdx);
+  else if (kind === "paste") pasteEquipmentAfter(eqIdx);
+}
+
 /** 從右鍵目標解析日期欄：含清單列上的「設定日期」按鈕（底層 input 在收合面板內） */
 function resolveDateInputFromEvent(ev) {
   const direct = ev.target.closest('input[type="date"]');
@@ -3808,7 +3933,21 @@ document.body.addEventListener("contextmenu", ev => {
   if (dateInput) {
     ev.preventDefault();
     ev.stopPropagation();
+    hideEqCtxMenu();
     showDateCtxMenu(ev.clientX, ev.clientY, dateInput);
+    return;
+  }
+  const eqIdx = resolveEqIndexFromEvent(ev);
+  if (eqIdx != null && Number.isFinite(eqIdx) && DATA.equipment[eqIdx]) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    // 先選中該設備，再跳出複製／貼上選單
+    if (state.tab === "items" && state.eq !== eqIdx) {
+      selectEquipment(eqIdx);
+    } else {
+      state.eq = eqIdx;
+    }
+    showEqCtxMenu(ev.clientX, ev.clientY, eqIdx);
     return;
   }
   const btn = ev.target.closest("[data-upload-photo]");
@@ -3832,6 +3971,16 @@ document.body.addEventListener("mousedown", ev => {
     runDateCtxAction(kind, input);
     return;
   }
+  const eqAct = ev.target.closest("[data-eq-ctx]");
+  if (eqAct) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const eqIdx = state.eqCtxTarget;
+    const kind = eqAct.dataset.eqCtx;
+    hideEqCtxMenu();
+    runEqCtxAction(kind, eqIdx);
+    return;
+  }
   // 擋住左側設備 button 取得 focus（Chrome 常因此把 overflow 清單捲去頂端）
   const eqBtn = ev.target.closest("#items [data-eq]");
   if (eqBtn) {
@@ -3839,6 +3988,8 @@ document.body.addEventListener("mousedown", ev => {
   }
   const onDateUi = ev.target.closest("#dateCtxMenu, input[type='date'], .date-hit, .date-cell, [data-toggle-dates], .date-drop");
   if (!onDateUi) hideDateCtxMenu();
+  const onEqUi = ev.target.closest("#eqCtxMenu");
+  if (!onEqUi) hideEqCtxMenu();
 }, true);
 
 document.addEventListener("keydown", ev => {
