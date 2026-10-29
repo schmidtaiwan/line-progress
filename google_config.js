@@ -9,7 +9,7 @@
  *   開資料夾 → 網址 .../folders/xxxxxxxx 的那一段
  */
 window.GOOGLE_CONFIG = {
-  clientId: "865222319751-1jbqneceh84tf5b0mst6g7b2re88q1cu.apps.googleusercontent.com",
+  clientId: "90391506221-41kb4us4hsuq7go94udf3o17hr2f9uoh.apps.googleusercontent.com",
 
   // ↓ 指定上傳資料夾（對應你雲端硬碟已有的 LineProcess）
   folderPath: "LineProcess",
