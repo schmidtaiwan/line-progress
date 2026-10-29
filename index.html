@@ -283,24 +283,58 @@
   }
   .gantt-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .gantt-grid {
-    min-width: 980px;
+    min-width: 1010px;
     display: grid;
-    grid-template-columns: 148px 64px 72px 52px 72px minmax(360px, 1fr);
+    grid-template-columns: 26px 132px 64px 72px 52px 72px minmax(360px, 1fr);
     gap: 6px 8px;
     align-items: center;
+  }
+  .gantt-seg-rail {
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    letter-spacing: 0.12em;
+    font-size: 12px;
+    font-weight: 800;
+    color: #16324a;
+    background: #d9e6f2;
+    border: 1px solid #b7c9db;
+    border-radius: 8px;
+    padding: 6px 0;
+    line-height: 1.1;
+  }
+  .gantt-seg-rail.tone-b { background: #d8eee4; border-color: #b5d5c5; color: #145a32; }
+  .gantt-seg-rail.empty {
+    background: transparent; border: none; padding: 0;
   }
   .gantt-axis-label, .gantt-meta-h {
     font-size: 11px; color: var(--muted); font-weight: 650;
   }
   .gantt-meta-h { text-align: center; }
   .gantt-axis {
-    position: relative; height: 22px;
+    position: relative; height: 34px;
     border-bottom: 1px solid var(--line);
     margin-bottom: 2px;
   }
-  .gantt-axis span {
-    position: absolute; top: 0; transform: translateX(-50%);
+  .gantt-axis > span {
+    position: absolute; bottom: 2px; transform: translateX(-50%);
     font-size: 11px; color: var(--muted); white-space: nowrap;
+  }
+  .gantt-today-cap {
+    position: absolute; top: 0; transform: translateX(-50%);
+    z-index: 5; pointer-events: none; text-align: center;
+  }
+  .gantt-today-cap b {
+    display: block;
+    font-size: 11px; font-weight: 800; color: #c0392b;
+    line-height: 1; white-space: nowrap;
+  }
+  .gantt-today-cap i {
+    display: block; width: 2px; height: 10px; margin: 2px auto 0;
+    background: #c0392b; opacity: 0.9;
   }
   .gantt-label {
     font-size: 12px; line-height: 1.25;
@@ -1212,7 +1246,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 19;
+const PAGE_BUILD = 20;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1762,9 +1796,12 @@ function renderLineGanttHtml() {
   }
   const today = Date.parse(new Date().toISOString().slice(0, 10) + "T00:00:00");
   let todayHtml = "";
+  let todayAxisHtml = "";
+  let todayLeftPct = null;
   if (today >= range.min && today <= range.max) {
-    const left = ((today - range.min) / range.span) * 100;
-    todayHtml = `<div class="gantt-today" style="left:${left}%" title="今天"></div>`;
+    todayLeftPct = ((today - range.min) / range.span) * 100;
+    todayHtml = `<div class="gantt-today" style="left:${todayLeftPct}%" title="今天"></div>`;
+    todayAxisHtml = `<div class="gantt-today-cap" style="left:${todayLeftPct}%"><b>今天</b><i></i></div>`;
   }
 
   // 各階段全域時段 → 底色帶＋分割線
@@ -1812,38 +1849,46 @@ function renderLineGanttHtml() {
   let overallPctSum = 0;
   let overallPctN = 0;
   let overallDelay = 0;
-  let lastSeg = null;
-  let segTone = -1;
-  const eqRows = eqList.map(eq => {
-    const items = allItemsOf(eq);
-    const ratio = ratioOf(items);
-    const stName = statusSelectValue(items, ratio);
-    const delays = delayCount(eq);
-    overallPctSum += ratio;
-    overallPctN += 1;
-    overallDelay += delays;
-    const segStart = eq.seg !== lastSeg;
-    if (segStart) {
-      lastSeg = eq.seg;
-      segTone += 1;
+  const segGroups = [];
+  eqList.forEach(eq => {
+    if (!segGroups.length || segGroups[segGroups.length - 1].seg !== eq.seg) {
+      segGroups.push({ seg: eq.seg || "", eqs: [eq] });
+    } else {
+      segGroups[segGroups.length - 1].eqs.push(eq);
     }
-    const toneCls = (segTone % 2 === 0 ? "gantt-seg-a" : "gantt-seg-b") + (segStart ? " gantt-seg-start" : "");
-    const bars = stages.map((s, si) => {
-      const sp = stageSpanForEq(eq, si);
-      if (!sp) return "";
-      const st = ganttBarStyle(sp, range, STAGE_BAR_COLORS[si % STAGE_BAR_COLORS.length]);
-      return `<div class="gantt-bar" style="left:${st.left};width:${st.width};background:${st.color}" title="${escapeAttr(eq.name + "｜" + s.name + "｜" + pctText(sp.pct))}">
-        <div class="fill" style="width:${st.pct}%"></div>
-        <div class="txt">${st.pct.toFixed(0)}%</div>
-      </div>`;
+  });
+  const eqRows = segGroups.map((grp, gi) => {
+    const toneBase = gi % 2 === 0 ? "gantt-seg-a" : "gantt-seg-b";
+    const railTone = gi % 2 === 0 ? "" : " tone-b";
+    const rail = `<div class="gantt-seg-rail${railTone}" style="grid-row: span ${grp.eqs.length}" title="${escapeAttr(grp.seg)}">${escapeHtml(grp.seg || "—")}</div>`;
+    const rows = grp.eqs.map((eq, ri) => {
+      const items = allItemsOf(eq);
+      const ratio = ratioOf(items);
+      const stName = statusSelectValue(items, ratio);
+      const delays = delayCount(eq);
+      overallPctSum += ratio;
+      overallPctN += 1;
+      overallDelay += delays;
+      const toneCls = toneBase + (ri === 0 ? " gantt-seg-start" : "");
+      const bars = stages.map((s, si) => {
+        const sp = stageSpanForEq(eq, si);
+        if (!sp) return "";
+        const st = ganttBarStyle(sp, range, STAGE_BAR_COLORS[si % STAGE_BAR_COLORS.length]);
+        return `<div class="gantt-bar" style="left:${st.left};width:${st.width};background:${st.color}" title="${escapeAttr(eq.name + "｜" + s.name + "｜" + pctText(sp.pct))}">
+          <div class="fill" style="width:${st.pct}%"></div>
+          <div class="txt">${st.pct.toFixed(0)}%</div>
+        </div>`;
+      }).join("");
+      const title = (eq.seg || "") + " " + (eq.idx || "") + " " + (eq.name || "");
+      const nameTxt = ((eq.idx != null && eq.idx !== "" ? eq.idx + " " : "") + (eq.name || "")).trim() || "—";
+      return `<div class="gantt-label ${toneCls}" title="${escapeAttr(title)}">${escapeHtml(nameTxt)}</div>
+        <div class="gantt-meta ${toneCls}"><span class="pct ${pctClass(ratio)}">${pctText(ratio)}</span></div>
+        <div class="gantt-meta ${toneCls}"><span class="s-${stName}">${escapeHtml(stName)}</span></div>
+        <div class="gantt-meta ${toneCls} ${delays ? "delay-hot" : ""}">${delays}</div>
+        <div class="gantt-meta owner ${toneCls}" title="${escapeAttr(eq.owner || "-")}">${escapeHtml(eq.owner || "-")}</div>
+        <div class="gantt-track ${toneCls}">${bandHtml}${todayHtml}${bars}</div>`;
     }).join("");
-    const title = (eq.seg || "") + " " + (eq.idx || "") + " " + (eq.name || "");
-    return `<div class="gantt-label ${toneCls}" title="${escapeAttr(title)}">${escapeHtml(eq.seg || "")} ${escapeHtml(eq.idx || "")} ${escapeHtml(eq.name || "")}</div>
-      <div class="gantt-meta ${toneCls}"><span class="pct ${pctClass(ratio)}">${pctText(ratio)}</span></div>
-      <div class="gantt-meta ${toneCls}"><span class="s-${stName}">${escapeHtml(stName)}</span></div>
-      <div class="gantt-meta ${toneCls} ${delays ? "delay-hot" : ""}">${delays}</div>
-      <div class="gantt-meta owner ${toneCls}" title="${escapeAttr(eq.owner || "-")}">${escapeHtml(eq.owner || "-")}</div>
-      <div class="gantt-track ${toneCls}">${bandHtml}${todayHtml}${bars}</div>`;
+    return rail + rows;
   }).join("");
 
   const overallRatio = overallPctN ? overallPctSum / overallPctN : 0;
@@ -1858,19 +1903,21 @@ function renderLineGanttHtml() {
       <div class="gantt-legend">${legend}<span>紅線＝今天</span></div>
     </div>
     <div class="gantt-scroll"><div class="gantt-grid">
+      <div class="gantt-seg-rail empty"></div>
       <div class="gantt-axis-label">項目</div>
       <div class="gantt-meta-h">完成度</div>
       <div class="gantt-meta-h">目前狀態</div>
       <div class="gantt-meta-h">延誤數</div>
       <div class="gantt-meta-h">OWNER</div>
-      <div class="gantt-axis">${axisMarks.join("")}</div>
+      <div class="gantt-axis">${todayAxisHtml}${axisMarks.join("")}</div>
+      <div class="gantt-seg-rail empty"></div>
       <div class="gantt-label overall">整線（五階段）</div>
       <div class="gantt-meta"><span class="pct ${pctClass(overallRatio)}">${pctText(overallRatio)}</span></div>
       <div class="gantt-meta"><span class="s-${overallStatus}">${escapeHtml(overallStatus)}</span></div>
       <div class="gantt-meta ${overallDelay ? "delay-hot" : ""}">${overallDelay}</div>
       <div class="gantt-meta owner">—</div>
       <div class="gantt-track overall">${bandHtml}${todayHtml}${overallBars}</div>
-      ${eqRows || `<div class="gantt-label">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="note">沒有符合的設備</div>`}
+      ${eqRows || `<div class="gantt-seg-rail empty"></div><div class="gantt-label">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="note">沒有符合的設備</div>`}
     </div></div>
   </section>`;
 }
