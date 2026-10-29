@@ -697,7 +697,8 @@
   body.locked #kpis,
   body.locked #foot,
   body.locked header.top h1,
-  body.locked header.top p { display: none !important; }
+  body.locked header.top p,
+  body.locked header.top .top-actions { display: none !important; }
   body.locked header.top .page-ver,
   body.locked header.top .top-right { display: flex !important; }
   body.locked header.top { padding: 10px 28px; min-height: 0; }
@@ -1191,7 +1192,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
-<script src="xlsx.full.min.js"></script>
+<script src="xlsx-js-style.min.js"></script>
 <script src="export_line_xlsx.js"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
@@ -1211,7 +1212,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 17;
+const PAGE_BUILD = 19;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1452,10 +1453,17 @@ function cloudBarHtml() {
   const logged = isCloudLoggedIn();
   const saveCls = "btn-cloud" + (state.dirty ? " dirty" : "");
   const saveLabel = state.dirty ? "儲存＊" : "儲存";
+  // 未登入：只顯示狀態＋登入按鈕
+  if (!logged) {
+    return `<div class="cloud-bar" id="cloudBar">
+      <span class="msg">${escapeHtml(window.LineOneDrive ? LineOneDrive.statusText() : "雲端模組未載入")}</span>
+      <button type="button" class="btn-cloud" data-cloud-login>登入 Google</button>
+    </div>`;
+  }
   return `<div class="cloud-bar" id="cloudBar">
       <span class="msg">${escapeHtml(window.LineOneDrive ? LineOneDrive.statusText() : "雲端模組未載入")}</span>
       ${viewerBadgeHtml()}
-      <button type="button" class="btn-cloud" data-cloud-login>${logged ? "重新登入" : "登入 Google"}</button>
+      <button type="button" class="btn-cloud" data-cloud-login>重新登入</button>
       <button type="button" class="btn-cloud ghost" data-cloud-pull>從雲端載入</button>
       <button type="button" class="${saveCls}" data-cloud-push title="將本機變更寫入 Google 雲端硬碟">${saveLabel}</button>
       <button type="button" class="btn-cloud ghost" data-cloud-logout>登出</button>
@@ -1464,17 +1472,23 @@ function cloudBarHtml() {
 function updateCloudBar() {
   const el = document.getElementById("cloudBar");
   if (!el || !window.LineOneDrive) return;
+  const logged = isCloudLoggedIn();
+  // 登入狀態改變時重建按鈕組（未登入只留登入鈕）
+  const hasExtra = !!el.querySelector("[data-cloud-pull], [data-cloud-push], [data-cloud-logout]");
+  if ((!logged && hasExtra) || (logged && !hasExtra)) {
+    el.outerHTML = cloudBarHtml();
+    return;
+  }
   const msg = el.querySelector(".msg");
   if (msg) msg.textContent = LineOneDrive.statusText();
   const badge = el.querySelector("#viewerBadge");
   if (badge) {
     const n = LineOneDrive.state.viewers || 0;
-    const logged = isCloudLoggedIn();
     badge.classList.toggle("off", !logged);
     badge.textContent = logged ? ("連線查看：" + n + " 個") : "連線查看：—";
   }
   const loginBtn = el.querySelector("[data-cloud-login]");
-  if (loginBtn) loginBtn.textContent = isCloudLoggedIn() ? "重新登入" : "登入 Google";
+  if (loginBtn) loginBtn.textContent = logged ? "重新登入" : "登入 Google";
   const saveBtn = el.querySelector("[data-cloud-push]");
   if (saveBtn) {
     saveBtn.textContent = state.dirty ? "儲存＊" : "儲存";
@@ -1500,7 +1514,7 @@ function renderLoginGate() {
       <h2>登入後繼續</h2>
       <p>${missing
         ? "雲端模組載入失敗，請重新整理頁面。若仍失敗請確認 google_config.js / line_google_sync.js 已上傳到 GitHub。"
-        : "未登入時不顯示進度資料。<br>請使用下方按鈕登入，再按「從雲端載入」。<br>改資料後請按「儲存」才會寫入雲端。"}</p>
+        : "未登入時不顯示進度資料。<br>請先按下方「登入 Google」；登入後即可載入／編輯雲端資料。"}</p>
       ${cloudBarHtml()}
     </div>`;
   document.getElementById("weekly").classList.remove("hidden");

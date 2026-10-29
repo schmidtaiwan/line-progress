@@ -1,6 +1,6 @@
 /**
  * 匯出四工作表 XLSX（對齊原檔紅框 sheets）
- * 依賴全域 XLSX（xlsx.full.min.js）與頁面 DATA / 輔助函式。
+ * 依賴全域 XLSX（xlsx-js-style，可寫入底色／字色）
  */
 (function (global) {
   "use strict";
@@ -15,6 +15,184 @@
     "組裝段": "B. 組裝段（架線前準備）",
     "測試段": "C. 測試段（架線前準備）"
   };
+
+  // 高反差配色：深底淺字 或 淺底深字
+  var C = {
+    titleBg: "16324A", titleFg: "FFFFFF",
+    subBg: "1F4E79", subFg: "F8FAFC",
+    headBg: "0F2740", headFg: "FFFFFF",
+    eqHeadBg: "1A5276", eqHeadFg: "FFFFFF",
+    eqBodyBg: "D6EAF8", eqBodyFg: "0B2C4A",
+    zebraBg: "EEF5FB",
+    whiteBg: "FFFFFF", ink: "1C2430", muted: "334155",
+    thin: "94A3B8",
+    stageHead: [
+      { bg: "C0392B", fg: "FFFFFF" }, // 準備：橘紅
+      { bg: "B7950B", fg: "FFFFFF" }, // 架機：琥珀
+      { bg: "1A5276", fg: "FFFFFF" }, // 單機：藍
+      { bg: "196F3D", fg: "FFFFFF" }, // 整線：綠
+      { bg: "6C3483", fg: "FFFFFF" }  // 上線：紫
+    ],
+    stageBody: [
+      { bg: "FADBD8", fg: "641E16" },
+      { bg: "FCF3CF", fg: "7D6608" },
+      { bg: "D4E6F1", fg: "1B4F72" },
+      { bg: "D5F5E3", fg: "145A32" },
+      { bg: "E8DAEF", fg: "4A235A" }
+    ],
+    urgHigh: { bg: "922B21", fg: "FFFFFF" },
+    urgMid: { bg: "B9770E", fg: "FFFFFF" },
+    urgLow: { bg: "1E8449", fg: "FFFFFF" },
+    stDelay: { bg: "922B21", fg: "FFFFFF" },
+    stRun: { bg: "1A5276", fg: "FFFFFF" },
+    stDone: { bg: "145A32", fg: "FFFFFF" },
+    stIdle: { bg: "5D6D7E", fg: "FFFFFF" },
+    segBoard: { bg: "1F6F9A", fg: "FFFFFF" },
+    segAssy: { bg: "1C8A5A", fg: "FFFFFF" },
+    segTest: { bg: "C0392B", fg: "FFFFFF" },
+    secBg: "0E4D6C", secFg: "FFFFFF",
+    topBg: "7B241C", topFg: "FFFFFF"
+  };
+
+  function rgb(hex) { return String(hex || "").replace(/^#/, "").toUpperCase(); }
+
+  function cellStyle(fg, bg, opts) {
+    opts = opts || {};
+    var s = {
+      font: {
+        name: "Microsoft JhengHei",
+        sz: opts.sz || 11,
+        bold: !!opts.bold,
+        color: { rgb: rgb(fg) }
+      },
+      fill: { patternType: "solid", fgColor: { rgb: rgb(bg) } },
+      alignment: {
+        horizontal: opts.h || "center",
+        vertical: "center",
+        wrapText: !!opts.wrap
+      }
+    };
+    if (opts.border !== false) {
+      var b = { style: "thin", color: { rgb: C.thin } };
+      s.border = { top: b, bottom: b, left: b, right: b };
+    }
+    return s;
+  }
+
+  function ensureCell(ws, r, c) {
+    var addr = XLSX.utils.encode_cell({ r: r, c: c });
+    if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+    return ws[addr];
+  }
+
+  function paintCell(ws, r, c, style) {
+    var cell = ensureCell(ws, r, c);
+    cell.s = style;
+    return cell;
+  }
+
+  function paintRange(ws, r0, c0, r1, c1, style) {
+    for (var r = r0; r <= r1; r++) {
+      for (var c = c0; c <= c1; c++) paintCell(ws, r, c, style);
+    }
+  }
+
+  function sheetRange(ws) {
+    var ref = ws["!ref"] || "A1";
+    return XLSX.utils.decode_range(ref);
+  }
+
+  function urgStyle(v) {
+    var s = String(v || "");
+    if (s.indexOf("高") >= 0) return cellStyle(C.urgHigh.fg, C.urgHigh.bg, { bold: true });
+    if (s.indexOf("低") >= 0) return cellStyle(C.urgLow.fg, C.urgLow.bg, { bold: true });
+    return cellStyle(C.urgMid.fg, C.urgMid.bg, { bold: true });
+  }
+
+  function statusStyle(v) {
+    var s = String(v || "");
+    if (s.indexOf("延誤") >= 0) return cellStyle(C.stDelay.fg, C.stDelay.bg, { bold: true });
+    if (s.indexOf("進行") >= 0) return cellStyle(C.stRun.fg, C.stRun.bg, { bold: true });
+    if (s.indexOf("完成") >= 0) return cellStyle(C.stDone.fg, C.stDone.bg, { bold: true });
+    return cellStyle(C.stIdle.fg, C.stIdle.bg, { bold: true });
+  }
+
+  function segStyle(v) {
+    var s = String(v || "");
+    if (s.indexOf("板") >= 0) return cellStyle(C.segBoard.fg, C.segBoard.bg, { bold: true });
+    if (s.indexOf("組裝") >= 0) return cellStyle(C.segAssy.fg, C.segAssy.bg, { bold: true });
+    if (s.indexOf("測試") >= 0) return cellStyle(C.segTest.fg, C.segTest.bg, { bold: true });
+    return cellStyle(C.eqBodyFg, C.eqBodyBg, { bold: true });
+  }
+
+  function paintTrackSheet(ws, nStages) {
+    var range = sheetRange(ws);
+    var maxC = Math.max(range.e.c, 6 + nStages * 5);
+    paintRange(ws, 0, 0, 0, maxC, cellStyle(C.titleFg, C.titleBg, { bold: true, sz: 14, h: "left", wrap: true }));
+    paintRange(ws, 1, 0, 1, maxC, cellStyle(C.subFg, C.subBg, { bold: true, sz: 10, h: "left", wrap: true }));
+    paintRange(ws, 2, 0, 2, 6, cellStyle(C.eqHeadFg, C.eqHeadBg, { bold: true, sz: 12 }));
+    paintRange(ws, 3, 0, 3, 6, cellStyle(C.headFg, C.headBg, { bold: true, sz: 10, wrap: true }));
+    for (var si = 0; si < nStages; si++) {
+      var c0 = 7 + si * 5;
+      var head = C.stageHead[si % C.stageHead.length];
+      var body = C.stageBody[si % C.stageBody.length];
+      paintRange(ws, 2, c0, 2, c0 + 4, cellStyle(head.fg, head.bg, { bold: true, sz: 12 }));
+      paintRange(ws, 3, c0, 3, c0 + 4, cellStyle(head.fg, head.bg, { bold: true, sz: 10, wrap: true }));
+      for (var r = 4; r <= range.e.r; r++) {
+        for (var c = c0; c <= c0 + 4; c++) {
+          var raw = ensureCell(ws, r, c).v;
+          if (c === c0 + 2) paintCell(ws, r, c, urgStyle(raw));
+          else if (c === c0 + 4) paintCell(ws, r, c, statusStyle(raw));
+          else paintCell(ws, r, c, cellStyle(body.fg, body.bg, { h: c === c0 ? "left" : "center" }));
+        }
+      }
+    }
+    for (var rr = 4; rr <= range.e.r; rr++) {
+      for (var cc = 0; cc <= 6; cc++) {
+        var vv = ensureCell(ws, rr, cc).v;
+        if (cc === 1 && vv) paintCell(ws, rr, cc, segStyle(vv));
+        else paintCell(ws, rr, cc, cellStyle(C.eqBodyFg, C.eqBodyBg, { h: cc === 2 ? "left" : "center", bold: cc <= 2 }));
+      }
+    }
+    ws["!rows"] = ws["!rows"] || [];
+    ws["!rows"][0] = { hpt: 28 };
+    ws["!rows"][2] = { hpt: 24 };
+    ws["!rows"][3] = { hpt: 32 };
+  }
+
+  function paintSimpleTable(ws, headerRows, opts) {
+    opts = opts || {};
+    var range = sheetRange(ws);
+    paintRange(ws, 0, 0, 0, range.e.c, cellStyle(C.titleFg, C.titleBg, { bold: true, sz: 14, h: "left", wrap: true }));
+    if (range.e.r >= 1) {
+      paintRange(ws, 1, 0, 1, range.e.c, cellStyle(C.subFg, C.subBg, { bold: true, sz: 10, h: "left", wrap: true }));
+    }
+    (headerRows || []).forEach(function (hr) {
+      paintRange(ws, hr, 0, hr, range.e.c, cellStyle(C.headFg, C.headBg, { bold: true, sz: 11, wrap: true }));
+    });
+    for (var r = 0; r <= range.e.r; r++) {
+      if ((headerRows || []).indexOf(r) >= 0 || r <= 1) continue;
+      var first = String(ensureCell(ws, r, 0).v || "");
+      if (!first) continue;
+      if (/^[①②③]|各階段|設備完成|甘特|報表|專案|林廠長|🏭/.test(first) || opts.sectionTest && opts.sectionTest(first)) {
+        paintRange(ws, r, 0, r, range.e.c, cellStyle(C.secFg, C.secBg, { bold: true, h: "left" }));
+        continue;
+      }
+      if (/^TOP/.test(first)) {
+        paintRange(ws, r, 0, r, range.e.c, cellStyle(C.topFg, C.topBg, { bold: true }));
+        continue;
+      }
+      var bg = (r % 2 === 0) ? C.zebraBg : C.whiteBg;
+      for (var c = 0; c <= range.e.c; c++) {
+        var v = ensureCell(ws, r, c).v;
+        var txt = String(v == null ? "" : v);
+        if (c === 1 && /板階段|組裝段|測試段/.test(txt)) paintCell(ws, r, c, segStyle(txt));
+        else if (/高|中|低/.test(txt) && txt.length <= 4) paintCell(ws, r, c, urgStyle(txt));
+        else if (/延誤|進行|完成|未開始/.test(txt)) paintCell(ws, r, c, statusStyle(txt));
+        else paintCell(ws, r, c, cellStyle(C.ink, bg, { h: c === 0 || c === 2 || c === 3 ? "left" : "center" }));
+      }
+    }
+  }
 
   function stageNames(DATA) {
     return (DATA.stages || []).map(function (s) { return s.name; });
@@ -146,6 +324,7 @@
     ].concat(names.flatMap(function () {
       return [{ wch: 22 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 10 }];
     }));
+    paintTrackSheet(ws, names.length || 5);
     return ws;
   }
 
@@ -212,6 +391,9 @@
       { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } }
     ];
     ws["!cols"] = [{ wch: 8 }, { wch: 10 }, { wch: 28 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    paintSimpleTable(ws, [4, 10, 40], {
+      sectionTest: function (t) { return /①|②|③|全部設備|急迫性/.test(t); }
+    });
     return ws;
   }
 
@@ -285,6 +467,28 @@
     }
     var ws = XLSX.utils.aoa_to_sheet(aoa);
     ws["!cols"] = [{ wch: 56 }, { wch: 2 }, { wch: 2 }, { wch: 2 }, { wch: 2 }, { wch: 2 }, { wch: 28 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 }];
+    paintSimpleTable(ws, [4], {
+      sectionTest: function (t) {
+        return /🏭|甘特|項目\/工項|板階段|組裝段|測試段|報表日期|專案|林廠長/.test(t) && t.indexOf("└") < 0;
+      }
+    });
+    // 右側甘特標題列
+    var rng = sheetRange(ws);
+    for (var r = 0; r <= rng.e.r; r++) {
+      var g = String(ensureCell(ws, r, 6).v || "");
+      if (g === "甘特圖（架線／五階段時程）" || g === "項目/工項") {
+        paintRange(ws, r, 6, r, Math.max(rng.e.c, 12), cellStyle(C.headFg, C.headBg, { bold: true, h: "left" }));
+      } else if (/^(板階段|組裝段|測試段)$/.test(g)) {
+        paintRange(ws, r, 6, r, Math.max(rng.e.c, 12), segStyle(g));
+      } else if (g) {
+        var bg = (r % 2 === 0) ? C.zebraBg : C.whiteBg;
+        for (var c = 6; c <= Math.max(rng.e.c, 12); c++) {
+          var vv = String(ensureCell(ws, r, c).v || "");
+          if (/延誤|進行|完成|未開始/.test(vv)) paintCell(ws, r, c, statusStyle(vv));
+          else paintCell(ws, r, c, cellStyle(C.ink, bg, { h: c === 6 ? "left" : "center" }));
+        }
+      }
+    }
     return ws;
   }
 
@@ -337,11 +541,22 @@
     ws["!cols"] = [{ wch: 8 }, { wch: 10 }, { wch: 28 }].concat(names.flatMap(function () {
       return [{ wch: 10 }, { wch: 12 }];
     })).concat([{ wch: 10 }, { wch: 8 }]);
+    paintSimpleTable(ws, [4, 10, 11], {
+      sectionTest: function (t) { return /各階段預計|設備完成率/.test(t); }
+    });
+    // 階段標題列著色
+    var or = sheetRange(ws);
+    for (var oc = 3; oc <= or.e.c - 2; oc++) {
+      var si = Math.floor((oc - 3) / 2);
+      var head = C.stageHead[si % C.stageHead.length];
+      if (or.e.r >= 10) paintCell(ws, 10, oc, cellStyle(head.fg, head.bg, { bold: true }));
+      if (or.e.r >= 11) paintCell(ws, 11, oc, cellStyle(head.fg, head.bg, { bold: true, sz: 10 }));
+    }
     return ws;
   }
 
   function exportFourSheets(DATA, filename) {
-    if (typeof XLSX === "undefined") throw new Error("缺少 XLSX 函式庫");
+    if (typeof XLSX === "undefined") throw new Error("缺少 XLSX 函式庫（xlsx-js-style）");
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, buildTrack(DATA), TRACK);
     XLSX.utils.book_append_sheet(wb, buildWeekly(DATA), WEEKLY);
