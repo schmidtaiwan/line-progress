@@ -125,6 +125,31 @@
     font-weight: 600;
   }
   nav.tabs button.active { background: var(--bg); color: var(--ink); }
+  nav.tabs button[data-tab="settings"] {
+    margin-left: 4px;
+    border: 1px solid rgba(255,255,255,0.35);
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+    border-radius: 10px 10px 0 0;
+  }
+  nav.tabs button[data-tab="settings"].active {
+    background: var(--bg);
+    color: var(--ink);
+    border-color: transparent;
+  }
+  header.top .btn-settings-top {
+    appearance: none;
+    border: 1px solid rgba(255,255,255,0.45);
+    background: #2a6f97;
+    color: #fff;
+    border-radius: 8px;
+    padding: 7px 12px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  header.top .btn-settings-top:hover { background: #3483b0; }
   .map-toolbar {
     display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
     margin-bottom: 14px;
@@ -937,6 +962,7 @@
     <div class="top-right">
       <span class="page-ver" id="pageVer">版次 —</span>
       <div class="top-actions">
+        <button type="button" class="btn-settings-top" data-open-settings title="製程段／階段／時程設定">設定</button>
         <button type="button" class="btn-import-top" data-import-xlsx title="匯入匯出格式的 Excel">匯入</button>
         <input type="file" id="importXlsxInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
         <div class="export-wrap">
@@ -955,7 +981,7 @@
     <button data-tab="overview"><span class="tab-full">架線階段進度總覽</span><span class="tab-short">總覽</span></button>
     <button data-tab="items"><span class="tab-full">架線項目清單管控</span><span class="tab-short">清單</span></button>
     <button data-tab="map"><span class="tab-full">設備總圖</span><span class="tab-short">總圖</span></button>
-    <button data-tab="settings"><span class="tab-full">設定</span><span class="tab-short">設定</span></button>
+    <button data-tab="settings"><span class="tab-full">⚙ 設定</span><span class="tab-short">⚙設定</span></button>
   </nav>
 </header>
 <main>
@@ -1010,7 +1036,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 11;
+const PAGE_BUILD = 12;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -2532,6 +2558,16 @@ async function cloudPush() {
 }
 
 document.body.addEventListener("click", ev => {
+  if (ev.target.closest("[data-open-settings]")) {
+    toggleExportMenu(false);
+    if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) {
+      toast("請先登入再進入設定");
+      return;
+    }
+    state.tab = "settings";
+    render();
+    return;
+  }
   if (ev.target.closest("[data-import-xlsx]")) {
     toggleExportMenu(false);
     triggerImportXlsx();
