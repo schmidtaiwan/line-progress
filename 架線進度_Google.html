@@ -502,7 +502,14 @@
   .section-title { margin: 18px 0 8px; font-size: 17px; }
   .note { color: var(--muted); font-size: 13px; margin-top: 10px; }
   .split { display: grid; grid-template-columns: 280px 1fr; gap: 12px; align-items: start; }
-  .eq-list { background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: auto; max-height: calc(100vh - 250px); }
+  .eq-list {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: auto;
+    max-height: calc(100vh - 250px);
+    overflow-anchor: none;
+  }
   .eq-list button {
     width: 100%;
     text-align: left;
@@ -512,6 +519,7 @@
     padding: 9px 12px;
     cursor: pointer;
     font: inherit;
+    overflow-anchor: none;
   }
   .eq-list button.on { background: #e7f0f7; }
   .eq-list .name { font-weight: 650; }
@@ -1005,6 +1013,7 @@
     overflow-x: auto;
     padding: 4px 2px 12px;
     -webkit-overflow-scrolling: touch;
+    overflow-anchor: none;
   }
   .m-eq-scroll button {
     flex: 0 0 auto;
@@ -1250,9 +1259,9 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
-<script src="xlsx-js-style.min.js?v=29"></script>
-<script src="exceljs.min.js?v=29"></script>
-<script src="export_line_xlsx.js?v=29"></script>
+<script src="xlsx-js-style.min.js?v=30"></script>
+<script src="exceljs.min.js?v=30"></script>
+<script src="export_line_xlsx.js?v=30"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 const STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1271,7 +1280,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 29;
+const PAGE_BUILD = 30;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -2247,23 +2256,45 @@ function captureEqListScroll() {
 }
 function restoreEqListScroll(saved) {
   if (!saved) return;
-  const apply = () => {
-    const desk = document.querySelector("#items .eq-list");
-    const mob = document.querySelector("#items .m-eq-scroll");
-    if (desk && saved.desk != null) desk.scrollTop = saved.desk;
-    if (mob && saved.mob) {
-      mob.scrollLeft = saved.mob.left || 0;
-      mob.scrollTop = saved.mob.top || 0;
-    }
-  };
-  apply();
-  requestAnimationFrame(apply);
+  const desk = document.querySelector("#items .eq-list");
+  const mob = document.querySelector("#items .m-eq-scroll");
+  if (desk && saved.desk != null) desk.scrollTop = saved.desk;
+  if (mob && saved.mob) {
+    mob.scrollLeft = saved.mob.left || 0;
+    mob.scrollTop = saved.mob.top || 0;
+  }
+}
+/** 選設備後瀏覽器常因 focus／重排把左側捲回頂，多幀鎖回原位置 */
+function pinEqListScroll(saved) {
+  if (!saved) return;
+  restoreEqListScroll(saved);
+  requestAnimationFrame(() => {
+    restoreEqListScroll(saved);
+    requestAnimationFrame(() => restoreEqListScroll(saved));
+  });
+  setTimeout(() => restoreEqListScroll(saved), 0);
+  setTimeout(() => restoreEqListScroll(saved), 50);
 }
 
 function syncEqListHighlight() {
   document.querySelectorAll("#items [data-eq]").forEach(btn => {
     btn.classList.toggle("on", Number(btn.dataset.eq) === state.eq);
   });
+}
+
+function selectEquipment(ei, opts) {
+  const scrollSave = captureEqListScroll();
+  state.eq = Number(ei);
+  state.openRemark = null;
+  state.openDates = null;
+  const preferDetail = !opts || opts.detailOnly !== false;
+  if (preferDetail && state.tab === "items" && document.querySelector("#items .eq-list, #items .m-eq-scroll")) {
+    refreshItemsDetailOnly(scrollSave);
+  } else {
+    state._eqListScroll = scrollSave;
+    render();
+    pinEqListScroll(scrollSave);
+  }
 }
 
 function buildItemsDetailHtml(eq) {
@@ -2375,15 +2406,25 @@ function buildItemsDetailHtml(eq) {
 }
 
 /** 只換右側明細，不動左側清單 DOM（避免捲動跳回頂端） */
-function refreshItemsDetailOnly() {
+function refreshItemsDetailOnly(scrollSave) {
+  const saved = scrollSave || captureEqListScroll();
   const eq = DATA.equipment[state.eq];
+  const host = document.querySelector("#items .detail-host");
   const detail = document.querySelector("#items .detail");
-  if (!eq || !detail) {
+  if (!eq || (!host && !detail)) {
+    state._eqListScroll = saved;
     renderItems();
+    pinEqListScroll(saved);
     return;
   }
   syncEqListHighlight();
-  detail.outerHTML = buildItemsDetailHtml(eq);
+  // 用穩定容器改 innerHTML，避免 outerHTML 重排把左側 scrollTop 清掉
+  if (host) {
+    host.innerHTML = buildItemsDetailHtml(eq);
+  } else {
+    detail.outerHTML = `<div class="detail-host">${buildItemsDetailHtml(eq)}</div>`;
+  }
+  pinEqListScroll(saved);
 }
 
 function renderItems() {
@@ -2402,7 +2443,7 @@ function renderItems() {
   const buttons = list.map(item => {
     const i = DATA.equipment.indexOf(item);
     const r = ratioOf(item.stages[state.stage].items);
-    return `<button type="button" data-eq="${i}" class="${i === state.eq ? "on" : ""}">
+    return `<button type="button" data-eq="${i}" class="${i === state.eq ? "on" : ""}" tabindex="-1">
       <div class="name">${item.idx} ${escapeHtml(item.name)}</div>
       <div class="sub">${item.seg}　${pctText(r)}　${escapeHtml(item.owner)}</div>
     </button>`;
@@ -2412,9 +2453,9 @@ function renderItems() {
     <div class="m-eq-scroll m-only">${buttons}</div>
     <div class="split">
       <div class="eq-list d-only">${buttons}</div>
-      ${buildItemsDetailHtml(eq)}
+      <div class="detail-host">${buildItemsDetailHtml(eq)}</div>
     </div>`;
-  restoreEqListScroll(scrollSave);
+  pinEqListScroll(scrollSave);
 }
 
 function qtyNumber(v) {
@@ -3504,37 +3545,38 @@ document.body.addEventListener("click", ev => {
   if (seg) { state.seg = seg.dataset.seg; render(); return; }
   const stage = ev.target.closest("[data-stage]");
   if (stage) {
+    const scrollSave = captureEqListScroll();
     state.stage = Number(stage.dataset.stage);
     state.openRemark = null;
     state.openDates = null;
-    if (state.tab === "items" && document.querySelector("#items .detail")) {
-      refreshItemsDetailOnly();
+    if (state.tab === "items" && document.querySelector("#items .detail-host, #items .detail")) {
+      refreshItemsDetailOnly(scrollSave);
     } else {
-      state._eqListScroll = captureEqListScroll();
+      state._eqListScroll = scrollSave;
       render();
+      pinEqListScroll(scrollSave);
     }
     return;
   }
   const eq = ev.target.closest("[data-eq]");
   if (eq) {
-    state.eq = Number(eq.dataset.eq);
-    state.openRemark = null;
-    state.openDates = null;
-    // 清單頁點左側設備：只刷新右側，保留左側捲動位置
-    if (state.tab === "items" && document.querySelector("#items .eq-list, #items .m-eq-scroll")) {
-      refreshItemsDetailOnly();
-    } else {
-      state._eqListScroll = captureEqListScroll();
-      render();
-    }
+    // 清單頁點左側設備：只刷新右側，並鎖住左側捲動
+    selectEquipment(eq.dataset.eq);
     return;
   }
   const toggleRemark = ev.target.closest("[data-toggle-remark]");
   if (toggleRemark) {
     const idx = Number(toggleRemark.dataset.toggleRemark);
+    const scrollSave = captureEqListScroll();
     state.openRemark = state.openRemark === idx ? null : idx;
     state.openDates = null;
-    render();
+    if (state.tab === "items" && document.querySelector("#items .detail-host, #items .detail")) {
+      refreshItemsDetailOnly(scrollSave);
+    } else {
+      state._eqListScroll = scrollSave;
+      render();
+      pinEqListScroll(scrollSave);
+    }
     const box = document.querySelector(`tr[data-remark-for="${idx}"] textarea`)
       || document.querySelector(`.remark-box[data-remark-for="${idx}"] textarea`);
     if (state.openRemark === idx && box) box.focus();
@@ -3543,8 +3585,15 @@ document.body.addEventListener("click", ev => {
   const toggleDates = ev.target.closest("[data-toggle-dates]");
   if (toggleDates) {
     const idx = Number(toggleDates.dataset.toggleDates);
+    const scrollSave = captureEqListScroll();
     state.openDates = state.openDates === idx ? null : idx;
-    render();
+    if (state.tab === "items" && document.querySelector("#items .detail-host, #items .detail")) {
+      refreshItemsDetailOnly(scrollSave);
+    } else {
+      state._eqListScroll = scrollSave;
+      render();
+      pinEqListScroll(scrollSave);
+    }
     return;
   }
   if (!ev.target.closest(".date-drop") && !ev.target.closest("[data-toggle-dates]")) {
@@ -3552,7 +3601,7 @@ document.body.addEventListener("click", ev => {
       state.openDates = null;
       const drop = document.querySelector(".date-drop.open");
       if (drop) {
-        render();
+        refreshItemsDetailOnly();
         return;
       }
     }
@@ -3699,6 +3748,11 @@ document.body.addEventListener("mousedown", ev => {
     hideDateCtxMenu();
     runDateCtxAction(kind, input);
     return;
+  }
+  // 擋住左側設備 button 取得 focus（Chrome 常因此把 overflow 清單捲去頂端）
+  const eqBtn = ev.target.closest("#items [data-eq]");
+  if (eqBtn) {
+    ev.preventDefault();
   }
   const onDateUi = ev.target.closest("#dateCtxMenu, input[type='date'], .date-hit, .date-cell, [data-toggle-dates], .date-drop");
   if (!onDateUi) hideDateCtxMenu();
