@@ -11,8 +11,8 @@
 window.GOOGLE_CONFIG = {
   clientId: "90391506221-41kb4us4hsuq7go94udf3o17hr2f9uoh.apps.googleusercontent.com",
 
-  // ↓ 指定上傳資料夾（對應你雲端硬碟已有的 LineProcess）
-  folderPath: "LineProcess",
+  // ↓ 指定上傳資料夾（對應你雲端硬碟已有的 R01_V4架線進度）
+  folderPath: "R01_V4架線進度",
 
   // 或改用資料夾 ID（有填則忽略 folderPath）
   folderId: "",
