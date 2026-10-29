@@ -199,6 +199,15 @@
   .kpi .label { color: var(--muted); font-size: 12px; }
   .kpi .value { font-size: 26px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
   .kpi .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .kpi .delay-break {
+    display: flex; flex-wrap: wrap; gap: 4px 8px;
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px dashed var(--line);
+    font-size: 11px; line-height: 1.35; color: var(--muted);
+  }
+  .kpi .delay-break span { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .kpi .delay-break b { color: var(--ink); font-weight: 700; }
+  .kpi .delay-break .hot b { color: var(--delay); }
   .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 12px; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; }
   .chips button, .stage-switch button {
@@ -949,7 +958,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 7;
+const PAGE_BUILD = 8;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1269,20 +1278,38 @@ function syncStageDue(eq, stageIdx) {
   st.due = first || "";
 }
 
+function stageDelayCounts() {
+  const counts = (DATA.stages || []).map((st, si) => {
+    let n = 0;
+    (DATA.equipment || []).forEach(eq => {
+      const items = eq.stages && eq.stages[si] && eq.stages[si].items;
+      if (!items) return;
+      n += items.filter(it => it.status === "延誤中").length;
+    });
+    return { name: st.name, mark: st.mark || st.name, count: n };
+  });
+  const total = counts.reduce((a, b) => a + b.count, 0);
+  return { counts, total };
+}
+
 function renderKpis() {
   const allPrep = DATA.equipment.flatMap(prepItems);
   const ratio = ratioOf(allPrep);
   const high = highOpen(allPrep);
-  const delay = DATA.equipment.reduce((n, eq) => n + delayCount(eq), 0);
+  const delayInfo = stageDelayCounts();
+  const delay = delayInfo.total;
   const segCounts = DATA.segOrder.map(seg => `${seg} ${DATA.equipment.filter(eq => eq.seg === seg).length}`).join("　");
+  const delayBreak = delayInfo.counts.map(s =>
+    `<span class="${s.count > 0 ? "hot" : ""}">${escapeHtml(s.mark)} <b>${s.count}</b></span>`
+  ).join("") + `<span>總計 <b>${delay}</b></span>`;
   const cards = [
-    ["設備數", String(DATA.equipment.length), segCounts],
-    ["架線前準備完成率", pctText(ratio), "依細項平均，與周報公式相同"],
-    ["高急迫未完成", String(high), "架線前準備，狀態不是已完成"],
-    ["五階段延誤項", String(delay), "狀態為延誤中的細項"]
+    { label: "設備數", value: String(DATA.equipment.length), sub: segCounts },
+    { label: "架線前準備完成率", value: pctText(ratio), sub: "依細項平均，與周報公式相同" },
+    { label: "高急迫未完成", value: String(high), sub: "架線前準備，狀態不是已完成" },
+    { label: "五階段延誤項", value: String(delay), sub: "狀態為延誤中的細項", extra: `<div class="delay-break">${delayBreak}</div>` }
   ];
-  document.getElementById("kpis").innerHTML = cards.map(([l, v, s]) =>
-    `<article class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></article>`
+  document.getElementById("kpis").innerHTML = cards.map(c =>
+    `<article class="kpi"><div class="label">${c.label}</div><div class="value">${c.value}</div><div class="sub">${c.sub}</div>${c.extra || ""}</article>`
   ).join("");
 }
 
