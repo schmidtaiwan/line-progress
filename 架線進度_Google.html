@@ -277,9 +277,9 @@
     display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
     gap: 8px; margin-bottom: 10px;
   }
-  .gantt-wrap .gantt-head h2 { margin: 0; font-size: 16px; }
+  .gantt-wrap .gantt-head h2 { margin: 0; font-size: 18pt; }
   .gantt-wrap .gantt-legend {
-    display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 12px; color: var(--muted);
+    display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 14pt; color: var(--muted);
   }
   .gantt-wrap .gantt-legend i {
     display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px;
@@ -301,7 +301,7 @@
     writing-mode: vertical-rl;
     text-orientation: upright;
     letter-spacing: 0.12em;
-    font-size: 12px;
+    font-size: 14pt;
     font-weight: 800;
     color: #16324a;
     background: #d9e6f2;
@@ -315,17 +315,17 @@
     background: transparent; border: none; padding: 0;
   }
   .gantt-axis-label, .gantt-meta-h {
-    font-size: 11px; color: var(--muted); font-weight: 650;
+    font-size: 13pt; color: var(--muted); font-weight: 650;
   }
   .gantt-meta-h { text-align: center; }
   .gantt-axis {
-    position: relative; height: 34px;
+    position: relative; height: 38px;
     border-bottom: 1px solid var(--line);
     margin-bottom: 2px;
   }
   .gantt-axis > span {
     position: absolute; bottom: 2px; transform: translateX(-50%);
-    font-size: 11px; color: var(--muted); white-space: nowrap;
+    font-size: 13pt; color: var(--muted); white-space: nowrap;
   }
   .gantt-today-cap {
     position: absolute; top: 0; transform: translateX(-50%);
@@ -333,7 +333,7 @@
   }
   .gantt-today-cap b {
     display: block;
-    font-size: 11px; font-weight: 800; color: #c0392b;
+    font-size: 13pt; font-weight: 800; color: #c0392b;
     line-height: 1; white-space: nowrap;
   }
   .gantt-today-cap i {
@@ -341,7 +341,7 @@
     background: #c0392b; opacity: 0.9;
   }
   .gantt-label {
-    font-size: 12px; line-height: 1.25;
+    font-size: 14pt; line-height: 1.25;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .gantt-label[data-gantt-eq] {
@@ -353,9 +353,9 @@
     text-decoration: underline;
   }
   .gantt-label.overall { font-weight: 700; color: #16324a; }
-  .gantt-label .sub { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
+  .gantt-label .sub { display: block; color: var(--muted); font-size: 13pt; font-weight: 400; }
   .gantt-meta {
-    font-size: 12px; text-align: center; font-variant-numeric: tabular-nums;
+    font-size: 14pt; text-align: center; font-variant-numeric: tabular-nums;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .gantt-meta.owner { text-align: left; padding-left: 2px; }
@@ -365,13 +365,13 @@
   .gantt-meta .s-已完成 { color: var(--done); font-weight: 650; }
   .gantt-meta .delay-hot { color: var(--delay); font-weight: 700; }
   .gantt-track {
-    position: relative; height: 28px;
+    position: relative; height: 34px;
     background: #f3f6f9;
     border: 1px solid #e6ebf0;
     border-radius: 8px;
     overflow: hidden;
   }
-  .gantt-track.overall { height: 32px; background: #eef3f8; }
+  .gantt-track.overall { height: 38px; background: #eef3f8; }
   .gantt-band {
     position: absolute; top: 0; bottom: 0; z-index: 0; pointer-events: none;
   }
@@ -431,7 +431,7 @@
   .gantt-bar .txt {
     position: absolute; inset: 0;
     display: flex; align-items: center; justify-content: center;
-    font-size: 10px; font-weight: 700; color: #fff;
+    font-size: 12pt; font-weight: 700; color: #fff;
     text-shadow: 0 1px 1px rgba(0,0,0,0.25);
     pointer-events: none; white-space: nowrap; padding: 0 4px;
   }
@@ -534,10 +534,20 @@
     background: #16324a !important;
     color: #fff !important;
     border-radius: 999px !important;
-    padding: 6px 14px !important;
+    padding: 6px 12px !important;
     font-weight: 700 !important;
     cursor: pointer;
     font: inherit;
+    line-height: 1;
+  }
+  .btn-add.icon-only, .btn-add-eq.icon-only {
+    width: 36px;
+    height: 36px;
+    padding: 0 !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px !important;
   }
   .btn-add:hover, .btn-add-eq:hover { filter: brightness(1.08); }
   .section-head {
@@ -821,6 +831,16 @@
     cursor: pointer;
     font: inherit;
     font-size: 12px;
+  }
+  .btn-del.icon-only {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    line-height: 1;
   }
   .edit-table input[type="text"],
   .edit-table input[type="number"],
@@ -1238,8 +1258,9 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
-<script src="xlsx-js-style.min.js"></script>
-<script src="export_line_xlsx.js"></script>
+<script src="xlsx-js-style.min.js?v=23"></script>
+<script src="exceljs.min.js?v=23"></script>
+<script src="export_line_xlsx.js?v=23"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 const STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1258,7 +1279,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 21;
+const PAGE_BUILD = 23;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -2023,7 +2044,7 @@ function renderWeekly() {
       <td class="high-count">${highOpen(items)}</td>
       <td><select class="s-${st}" data-eq-field="status">${optionHtml(STATUS_OPTS, st)}</select></td>
       <td><input type="text" data-eq-field="owner" value="${escapeAttr(eq.owner || "")}"></td>
-      <td><button type="button" class="btn-del" data-del-eq="${ei}">刪除</button></td>
+      <td><button type="button" class="btn-del icon-only" data-del-eq="${ei}" title="刪除設備" aria-label="刪除設備">🗑</button></td>
     </tr>`;
     const card = `<article class="m-eq-card" data-eq-idx="${ei}">
       <div class="m-title">${escapeHtml(eq.idx || "")}. ${escapeHtml(eq.name || "未命名")}</div>
@@ -2036,7 +2057,7 @@ function renderWeekly() {
       <div class="m-field"><label>高急迫</label><div class="high-count">${highOpen(items)}</div></div>
       <div class="m-field"><label>狀態</label><select class="s-${st}" data-eq-field="status">${optionHtml(STATUS_OPTS, st)}</select></div>
       <div class="m-field"><label>Owner</label><input type="text" data-eq-field="owner" value="${escapeAttr(eq.owner || "")}"></div>
-      <button type="button" class="btn-del" data-del-eq="${ei}">刪除設備</button>
+      <button type="button" class="btn-del icon-only" data-del-eq="${ei}" title="刪除設備" aria-label="刪除設備">🗑</button>
     </article>`;
     return { row, card };
   });
@@ -2077,7 +2098,7 @@ function renderWeekly() {
     ${chipsToolbar("")}
     <div class="section-head">
       <h2 class="section-title">全部設備｜架線前準備進度</h2>
-      <button type="button" class="btn-add-eq" data-add-eq>＋ 新增</button>
+      <button type="button" class="btn-add-eq icon-only" data-add-eq title="新增設備" aria-label="新增設備">＋</button>
     </div>
     <div class="m-eq-cards">${mCards}</div>
     <div class="scroll desktop-table"><table class="edit-table">
@@ -2286,7 +2307,7 @@ function renderItems() {
       </td>
       <td><select class="s-${it.status}" data-field="status">${optionHtml(STATUS_OPTS, it.status || "未開始")}</select></td>
       <td>${photoBtnHtml(it, idx)}</td>
-      <td><button type="button" class="btn-del" data-del-item="${idx}">刪除</button></td>
+      <td><button type="button" class="btn-del icon-only" data-del-item="${idx}" title="刪除項目" aria-label="刪除項目">🗑</button></td>
     </tr>
     <tr class="remark-row ${open ? "" : "hidden"}" data-remark-for="${idx}">
       <td colspan="8">
@@ -2327,7 +2348,7 @@ function renderItems() {
         <label>雲端照片</label>
         ${photoGalleryHtml(it, idx) || '<p class="note" style="margin:0">尚無照片</p>'}
       </div>
-      <button type="button" class="btn-del" data-del-item="${idx}">刪除項目</button>
+      <button type="button" class="btn-del icon-only" data-del-item="${idx}" title="刪除項目" aria-label="刪除項目">🗑</button>
     </article>`;
     return { row, card };
   });
@@ -2348,7 +2369,7 @@ function renderItems() {
         <div class="mini-bars" style="margin-bottom:10px">${minis}</div>
         <div class="stage-switch">
           ${stageBtns}
-          <button type="button" class="btn-add" data-add-item>＋ 新增項目</button>
+          <button type="button" class="btn-add icon-only" data-add-item title="新增項目" aria-label="新增項目">＋</button>
         </div>
         <div class="m-item-cards">${itemCards}</div>
         <div class="desktop-table"><table class="edit-table">
@@ -2870,14 +2891,15 @@ function downloadBlob(filename, blob) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1500);
 }
 
-function exportLocalExcel() {
+async function exportLocalExcel() {
   try {
     if (typeof exportLineFourSheets !== "function" || typeof XLSX === "undefined") {
       toast("Excel 匯出元件尚未載入，請重新整理後再試");
       return;
     }
-    exportLineFourSheets(DATA, "Jason追蹤表_" + exportStamp() + ".xlsx");
-    toast("已匯出 Excel（四工作表）到本機");
+    toast("正在匯出 Excel…");
+    await Promise.resolve(exportLineFourSheets(DATA, "Jason追蹤表_" + exportStamp() + ".xlsx"));
+    toast("已匯出彩色 Excel（四工作表）到本機");
   } catch (e) {
     console.error(e);
     toast("匯出 Excel 失敗：" + (e && e.message ? e.message : e));

@@ -16,45 +16,58 @@
     "測試段": "C. 測試段（架線前準備）"
   };
 
-  // 高反差配色：深底淺字 或 淺底深字
+  // 對齊原檔風格：標題橘字、設備深藍、五階段橘／黃／藍／綠／紫；字色與底色高反差
   var C = {
-    titleBg: "16324A", titleFg: "FFFFFF",
-    subBg: "1F4E79", subFg: "F8FAFC",
-    headBg: "0F2740", headFg: "FFFFFF",
-    eqHeadBg: "1A5276", eqHeadFg: "FFFFFF",
+    titleBg: "FFF8F0", titleFg: "C0392B",
+    subBg: "F4F6F8", subFg: "4A5568",
+    headBg: "1B3A57", headFg: "FFFFFF",
+    eqHeadBg: "2E5A88", eqHeadFg: "FFFFFF",
     eqBodyBg: "D6EAF8", eqBodyFg: "0B2C4A",
     zebraBg: "EEF5FB",
     whiteBg: "FFFFFF", ink: "1C2430", muted: "334155",
     thin: "94A3B8",
+    pctZero: "C0392B",
     stageHead: [
-      { bg: "C0392B", fg: "FFFFFF" }, // 準備：橘紅
-      { bg: "B7950B", fg: "FFFFFF" }, // 架機：琥珀
-      { bg: "1A5276", fg: "FFFFFF" }, // 單機：藍
-      { bg: "196F3D", fg: "FFFFFF" }, // 整線：綠
-      { bg: "6C3483", fg: "FFFFFF" }  // 上線：紫
+      { bg: "E67E22", fg: "FFFFFF" }, // 架線前準備
+      { bg: "F1C40F", fg: "1C2430" }, // 架機（黃底深字）
+      { bg: "2980B9", fg: "FFFFFF" }, // 單機
+      { bg: "27AE60", fg: "FFFFFF" }, // 整線
+      { bg: "8E44AD", fg: "FFFFFF" }  // 上線
     ],
     stageBody: [
-      { bg: "FADBD8", fg: "641E16" },
+      { bg: "FDEBD0", fg: "6E2C00" },
       { bg: "FCF3CF", fg: "7D6608" },
       { bg: "D4E6F1", fg: "1B4F72" },
       { bg: "D5F5E3", fg: "145A32" },
       { bg: "E8DAEF", fg: "4A235A" }
     ],
-    urgHigh: { bg: "922B21", fg: "FFFFFF" },
-    urgMid: { bg: "B9770E", fg: "FFFFFF" },
+    urgHigh: { bg: "C0392B", fg: "FFFFFF" },
+    urgMid: { bg: "E67E22", fg: "FFFFFF" },
     urgLow: { bg: "1E8449", fg: "FFFFFF" },
-    stDelay: { bg: "922B21", fg: "FFFFFF" },
-    stRun: { bg: "1A5276", fg: "FFFFFF" },
-    stDone: { bg: "145A32", fg: "FFFFFF" },
-    stIdle: { bg: "5D6D7E", fg: "FFFFFF" },
+    stDelay: { bg: "C0392B", fg: "FFFFFF" },
+    stRun: { bg: "2980B9", fg: "FFFFFF" },
+    stDone: { bg: "1E8449", fg: "FFFFFF" },
+    stIdle: { bg: "7F8C8D", fg: "FFFFFF" },
     segBoard: { bg: "1F6F9A", fg: "FFFFFF" },
     segAssy: { bg: "1C8A5A", fg: "FFFFFF" },
     segTest: { bg: "C0392B", fg: "FFFFFF" },
-    secBg: "0E4D6C", secFg: "FFFFFF",
-    topBg: "7B241C", topFg: "FFFFFF"
+    secBg: "1B4F72", secFg: "FFFFFF",
+    topBg: "922B21", topFg: "FFFFFF"
   };
 
-  function rgb(hex) { return String(hex || "").replace(/^#/, "").toUpperCase(); }
+  function rgb(hex) {
+    var h = String(hex || "").replace(/^#/, "").toUpperCase();
+    if (h.length === 8) return h.slice(2);
+    return h;
+  }
+
+  /** ExcelJS / OOXML 需 AARRGGBB */
+  function argb(hex) {
+    var h = String(hex || "").replace(/^#/, "").toUpperCase();
+    if (h.length === 8) return h;
+    if (h.length === 6) return "FF" + h;
+    return "FF000000";
+  }
 
   function cellStyle(fg, bg, opts) {
     opts = opts || {};
@@ -63,9 +76,12 @@
         name: "Microsoft JhengHei",
         sz: opts.sz || 11,
         bold: !!opts.bold,
-        color: { rgb: rgb(fg) }
+        color: { rgb: rgb(fg), argb: argb(fg) }
       },
-      fill: { patternType: "solid", fgColor: { rgb: rgb(bg) } },
+      fill: {
+        patternType: "solid",
+        fgColor: { rgb: rgb(bg), argb: argb(bg) }
+      },
       alignment: {
         horizontal: opts.h || "center",
         vertical: "center",
@@ -73,7 +89,7 @@
       }
     };
     if (opts.border !== false) {
-      var b = { style: "thin", color: { rgb: C.thin } };
+      var b = { style: "thin", color: { rgb: rgb(C.thin), argb: argb(C.thin) } };
       s.border = { top: b, bottom: b, left: b, right: b };
     }
     return s;
@@ -143,7 +159,10 @@
           var raw = ensureCell(ws, r, c).v;
           if (c === c0 + 2) paintCell(ws, r, c, urgStyle(raw));
           else if (c === c0 + 4) paintCell(ws, r, c, statusStyle(raw));
-          else paintCell(ws, r, c, cellStyle(body.fg, body.bg, { h: c === c0 ? "left" : "center" }));
+          else if (c === c0 + 1) {
+            var pctFg = (Number(raw) === 0 || raw === "0%" || raw === 0) ? C.pctZero : body.fg;
+            paintCell(ws, r, c, cellStyle(pctFg, body.bg, { bold: true }));
+          } else paintCell(ws, r, c, cellStyle(body.fg, body.bg, { h: c === c0 ? "left" : "center" }));
         }
       }
     }
@@ -555,14 +574,121 @@
     return ws;
   }
 
+  function mapStyleToExcelJs(cell, s) {
+    if (!s) return;
+    if (s.font) {
+      cell.font = {
+        name: s.font.name || "Microsoft JhengHei",
+        size: s.font.sz || 11,
+        bold: !!s.font.bold,
+        color: { argb: argb((s.font.color && (s.font.color.argb || s.font.color.rgb)) || C.ink) }
+      };
+    }
+    if (s.fill && s.fill.fgColor) {
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: argb(s.fill.fgColor.argb || s.fill.fgColor.rgb) }
+      };
+    }
+    if (s.alignment) {
+      cell.alignment = {
+        horizontal: s.alignment.horizontal || "center",
+        vertical: "middle",
+        wrapText: !!s.alignment.wrapText
+      };
+    }
+    if (s.border) {
+      var thin = { style: "thin", color: { argb: argb(C.thin) } };
+      cell.border = { top: thin, left: thin, bottom: thin, right: thin };
+    }
+  }
+
+  function xlsxSheetToExcelJs(book, sheetName, xws) {
+    var ws = book.addWorksheet(sheetName, {
+      views: [{ state: "frozen", ySplit: 4, xSplit: 7 }]
+    });
+    if (sheetName !== TRACK) {
+      ws.views = [{ state: "frozen", ySplit: 2 }];
+    }
+    var ref = xws["!ref"] || "A1";
+    var range = XLSX.utils.decode_range(ref);
+    for (var r = range.s.r; r <= range.e.r; r++) {
+      for (var c = range.s.c; c <= range.e.c; c++) {
+        var addr = XLSX.utils.encode_cell({ r: r, c: c });
+        var src = xws[addr];
+        if (!src) continue;
+        var cell = ws.getCell(r + 1, c + 1);
+        if (src.t === "n" && typeof src.v === "number") {
+          cell.value = src.v;
+          // 清單表完成率欄（每階段第 2 欄）寫成百分比
+          if (sheetName === TRACK && c >= 7 && ((c - 7) % 5) === 1) {
+            cell.numFmt = "0%";
+          }
+        } else if (src.v != null && src.v !== "") {
+          cell.value = src.v;
+        }
+        if (src.s) mapStyleToExcelJs(cell, src.s);
+      }
+    }
+    (xws["!merges"] || []).forEach(function (m) {
+      ws.mergeCells(m.s.r + 1, m.s.c + 1, m.e.r + 1, m.e.c + 1);
+    });
+    (xws["!cols"] || []).forEach(function (col, i) {
+      if (!col) return;
+      ws.getColumn(i + 1).width = Math.max(4, (col.wch || 10) * 1.05);
+    });
+    (xws["!rows"] || []).forEach(function (row, i) {
+      if (!row) return;
+      ws.getRow(i + 1).height = row.hpt || 18;
+    });
+    return ws;
+  }
+
+  function downloadArrayBuffer(buf, filename) {
+    var blob = new Blob([buf], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1500);
+  }
+
+  /**
+   * 用 ExcelJS 寫出帶底色／字色的 xlsx（xlsx-js-style 在部分環境會丟樣式）
+   * @returns {Promise<void>}
+   */
   function exportFourSheets(DATA, filename) {
-    if (typeof XLSX === "undefined") throw new Error("缺少 XLSX 函式庫（xlsx-js-style）");
+    if (typeof XLSX === "undefined") throw new Error("缺少 XLSX 函式庫");
+    var name = filename || ("Jason追蹤表_" + Date.now() + ".xlsx");
+    var track = buildTrack(DATA);
+    var weekly = buildWeekly(DATA);
+    var outlook = buildOutlook(DATA);
+    var overview = buildOverview(DATA);
+
+    if (typeof ExcelJS !== "undefined") {
+      var book = new ExcelJS.Workbook();
+      book.creator = "Jason追蹤表";
+      book.created = new Date();
+      xlsxSheetToExcelJs(book, TRACK, track);
+      xlsxSheetToExcelJs(book, WEEKLY, weekly);
+      xlsxSheetToExcelJs(book, OUTLOOK, outlook);
+      xlsxSheetToExcelJs(book, OVERVIEW, overview);
+      return book.xlsx.writeBuffer().then(function (buf) {
+        downloadArrayBuffer(buf, name);
+      });
+    }
+
+    // fallback：xlsx-js-style（需支援 cell.s）
     var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, buildTrack(DATA), TRACK);
-    XLSX.utils.book_append_sheet(wb, buildWeekly(DATA), WEEKLY);
-    XLSX.utils.book_append_sheet(wb, buildOutlook(DATA), OUTLOOK);
-    XLSX.utils.book_append_sheet(wb, buildOverview(DATA), OVERVIEW);
-    XLSX.writeFile(wb, filename || ("Jason追蹤表_" + Date.now() + ".xlsx"));
+    XLSX.utils.book_append_sheet(wb, track, TRACK);
+    XLSX.utils.book_append_sheet(wb, weekly, WEEKLY);
+    XLSX.utils.book_append_sheet(wb, outlook, OUTLOOK);
+    XLSX.utils.book_append_sheet(wb, overview, OVERVIEW);
+    XLSX.writeFile(wb, name);
+    return Promise.resolve();
   }
 
   function cellStr(v) {
