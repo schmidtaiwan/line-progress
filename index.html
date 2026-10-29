@@ -941,6 +941,8 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
+<script src="xlsx.full.min.js"></script>
+<script src="export_line_xlsx.js"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 const STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -958,7 +960,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 8;
+const PAGE_BUILD = 9;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1889,15 +1891,17 @@ function downloadBlob(filename, blob) {
 }
 
 function exportLocalExcel() {
-  const headers = ["項次","製程段","設備","數量","Owner","PM","階段","待完成事項","完成率","急迫性","預計開始","預計完成","實際完成","狀態","備註","照片數"];
-  const rows = flattenExportRows();
-  const lines = [headers.join(",")].concat(rows.map(r => [
-    r.idx, r.seg, r.eqName, r.qty, r.owner, r.pm, r.stage, r.item, r.pct, r.urg, r.start, r.due, r.actual, r.status, r.note, r.photos
-  ].map(csvEscape).join(",")));
-  // Excel 可直接開的 UTF-8 CSV（含 BOM）
-  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-  downloadBlob("Jason追蹤表_" + exportStamp() + ".csv", blob);
-  toast("已匯出 Excel（CSV）到本機");
+  try {
+    if (typeof exportLineFourSheets !== "function" || typeof XLSX === "undefined") {
+      toast("Excel 匯出元件尚未載入，請重新整理後再試");
+      return;
+    }
+    exportLineFourSheets(DATA, "Jason追蹤表_" + exportStamp() + ".xlsx");
+    toast("已匯出 Excel（四工作表）到本機");
+  } catch (e) {
+    console.error(e);
+    toast("匯出 Excel 失敗：" + (e && e.message ? e.message : e));
+  }
 }
 
 function exportLocalPdf() {
