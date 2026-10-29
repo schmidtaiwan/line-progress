@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
-<title>TW1 VIVO R01 架線進度</title>
+<title>Jason追蹤表</title>
 <script>
 (function () {
   try {
@@ -58,6 +58,20 @@
     padding: 18px 28px 0;
   }
   header.top h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: 0.2px; }
+  header.top .top-row {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  header.top .page-ver {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 600;
+    color: #9eb4c6;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 999px;
+    padding: 4px 10px;
+    letter-spacing: 0.2px;
+  }
   header.top p { margin: 6px 0 14px; color: #c9d6e2; font-size: 13px; }
   nav.tabs { display: flex; gap: 6px; align-items: flex-end; flex-wrap: wrap; }
   nav.tabs button {
@@ -474,6 +488,7 @@
   body.locked #foot,
   body.locked header.top h1,
   body.locked header.top p { display: none !important; }
+  body.locked header.top .page-ver { display: inline-block !important; }
   body.locked header.top { padding: 10px 28px; min-height: 0; }
   .btn-del {
     border: 1px solid #e2b8b4;
@@ -764,7 +779,10 @@
 </head>
 <body>
 <header class="top">
-  <h1 id="title"></h1>
+  <div class="top-row">
+    <h1 id="title"></h1>
+    <span class="page-ver" id="pageVer">版次 —</span>
+  </div>
   <p id="subtitle"></p>
   <nav class="tabs" id="tabs">
     <button data-tab="weekly" class="active"><span class="tab-full">架線周報</span><span class="tab-short">周報</span></button>
@@ -811,6 +829,7 @@ try {
   if (savedDir === "ltr" || savedDir === "rtl") state.mapDir = savedDir;
 } catch (e) {}
 
+const PAGE_VERSION = "2026-10-29"; // 每次改網頁請更新這行日期
 function isMobileView() {
   try {
     if (window.matchMedia && window.matchMedia("(max-width: 900px)").matches) return true;
@@ -1010,6 +1029,8 @@ function renderLoginGate() {
   document.body.classList.add("locked");
   document.getElementById("title").textContent = "";
   document.getElementById("subtitle").textContent = "";
+  const verGate = document.getElementById("pageVer");
+  if (verGate) verGate.textContent = "版次 " + PAGE_VERSION;
   document.getElementById("kpis").innerHTML = "";
   document.getElementById("overview").innerHTML = "";
   document.getElementById("items").innerHTML = "";
@@ -1506,8 +1527,10 @@ function renderMap() {
 
 function updateFoot() {
   const flag = state.dirty ? "　｜　有未寫回 Excel 的本機修改" : "";
+  const verEl = document.getElementById("pageVer");
+  if (verEl) verEl.textContent = "版次 " + PAGE_VERSION;
   document.getElementById("foot").textContent =
-    `資料來源 ${DATA.source}　｜　網頁產生 ${DATA.built}　｜　完成率由細項即時彙總${flag}`;
+    `版次 ${PAGE_VERSION}　｜　資料來源 ${DATA.source}　｜　網頁產生 ${DATA.built}　｜　完成率由細項即時彙總${flag}`;
 }
 
 function render() {
