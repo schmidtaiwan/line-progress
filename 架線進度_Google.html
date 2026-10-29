@@ -1250,9 +1250,9 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
-<script src="xlsx-js-style.min.js?v=27"></script>
-<script src="exceljs.min.js?v=27"></script>
-<script src="export_line_xlsx.js?v=27"></script>
+<script src="xlsx-js-style.min.js?v=28"></script>
+<script src="exceljs.min.js?v=28"></script>
+<script src="export_line_xlsx.js?v=28"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 const STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1271,7 +1271,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 27;
+const PAGE_BUILD = 28;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -2237,7 +2237,31 @@ async function showPhotoPreview(itemIdx) {
   }
 }
 
+function captureEqListScroll() {
+  const desk = document.querySelector("#items .eq-list");
+  const mob = document.querySelector("#items .m-eq-scroll");
+  return {
+    desk: desk ? desk.scrollTop : null,
+    mob: mob ? { left: mob.scrollLeft, top: mob.scrollTop } : null
+  };
+}
+function restoreEqListScroll(saved) {
+  if (!saved) return;
+  const desk = document.querySelector("#items .eq-list");
+  const mob = document.querySelector("#items .m-eq-scroll");
+  if (desk && saved.desk != null) desk.scrollTop = saved.desk;
+  if (mob && saved.mob) {
+    mob.scrollLeft = saved.mob.left || 0;
+    mob.scrollTop = saved.mob.top || 0;
+  }
+  const on = document.querySelector("#items .eq-list button.on, #items .m-eq-scroll button.on");
+  if (on && typeof on.scrollIntoView === "function") {
+    try { on.scrollIntoView({ block: "nearest", inline: "nearest" }); } catch (e) {}
+  }
+}
+
 function renderItems() {
+  const scrollSave = captureEqListScroll();
   const list = visibleEq();
   if (!list.length) {
     document.getElementById("items").innerHTML = toolbar(`<label><input type="checkbox" id="onlyHigh" ${state.onlyHigh ? "checked" : ""}> 只看高急迫</label>`)
@@ -2367,6 +2391,7 @@ function renderItems() {
         <p class="note">點細項名稱可展開備註；點「預計完成」可下拉設定預計開始／預計完成／實際完成時間。</p>
       </div>
     </div>`;
+  restoreEqListScroll(scrollSave);
 }
 
 function qtyNumber(v) {
