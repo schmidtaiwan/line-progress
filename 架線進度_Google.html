@@ -925,17 +925,40 @@
   .settings-panel h2 { margin: 0 0 6px; font-size: 17px; }
   .settings-panel .hint { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
   .settings-panel.full { grid-column: 1 / -1; }
-  .stage-on-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .stage-on-table th, .stage-on-table td {
-    border: 1px solid var(--line);
-    padding: 6px 8px;
+  .edit-table th.stage-on-h,
+  .edit-table td.stage-on-c {
     text-align: center;
-    vertical-align: middle;
+    min-width: 48px;
+    padding-left: 4px;
+    padding-right: 4px;
   }
-  .stage-on-table th { background: #f4f7fa; font-weight: 650; white-space: nowrap; }
-  .stage-on-table td.eq-name { text-align: left; white-space: nowrap; min-width: 140px; }
-  .stage-on-table td.eq-name .sub { color: var(--muted); font-size: 12px; }
-  .stage-on-table input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+  .edit-table td.stage-on-c input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+  }
+  .stage-on-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+  .stage-on-chips label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .settings-unified { display: flex; flex-direction: column; gap: 14px; }
+  .settings-structure {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  @media (max-width: 900px) {
+    .settings-structure { grid-template-columns: 1fr; }
+  }
   .set-row {
     display: grid; gap: 8px; align-items: center;
     padding: 10px 0; border-bottom: 1px solid #eef2f6;
@@ -1274,9 +1297,9 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
-<script src="xlsx-js-style.min.js?v=33"></script>
-<script src="exceljs.min.js?v=33"></script>
-<script src="export_line_xlsx.js?v=33"></script>
+<script src="xlsx-js-style.min.js?v=34"></script>
+<script src="exceljs.min.js?v=34"></script>
+<script src="export_line_xlsx.js?v=34"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 const STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1295,7 +1318,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 33;
+const PAGE_BUILD = 34;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -2115,24 +2138,29 @@ function renderWeekly() {
     <p class="note">設備增刪／改名／改製程段／Owner 等請到「設定」頁維護。完成率請在「工作項目清單」細項更新。${escapeHtml(DATA.note || "")}</p>`;
 }
 
-/** 設備主檔編輯（原周報設定表）→ 供設定頁使用 */
+/** 設備＋適用階段整合表（設定頁主表單） */
 function buildEquipmentMasterHtml() {
+  const stageHeads = (DATA.stages || []).map(s =>
+    `<th class="stage-on-h" title="${escapeAttr(s.name)}">${escapeHtml(s.mark || s.name)}</th>`
+  ).join("");
+  const colCount = 7 + (DATA.stages || []).length;
   const eqBlocks = visibleEq().map(eq => {
     const ei = DATA.equipment.indexOf(eq);
-    const items = prepItems(eq);
-    const ratio = ratioOf(items);
-    const st = statusSelectValue(items, ratio);
+    ensureStageOn(eq);
+    const stageCells = (DATA.stages || []).map((s, si) =>
+      `<td class="stage-on-c"><input type="checkbox" data-eq-stage-on="${ei}" data-stage-i="${si}" ${eq.stageOn[si] ? "checked" : ""} title="${escapeAttr((eq.name || "") + "｜" + s.name)}"></td>`
+    ).join("");
+    const stageChips = (DATA.stages || []).map((s, si) =>
+      `<label><input type="checkbox" data-eq-stage-on="${ei}" data-stage-i="${si}" ${eq.stageOn[si] ? "checked" : ""}> ${escapeHtml(s.mark || s.name)}</label>`
+    ).join("");
     const row = `<tr data-eq-idx="${ei}">
       <td class="col-idx"><input type="text" class="idx-input" data-eq-field="idx" value="${escapeAttr(eq.idx || "")}"></td>
       <td><select class="seg-select ${eq.seg}" data-eq-field="seg">${optionHtml(DATA.segOrder, eq.seg)}</select></td>
       <td><input type="text" data-eq-field="name" value="${escapeAttr(eq.name || "")}"></td>
       <td><input type="text" class="qty-input" data-eq-field="qty" value="${escapeAttr(eq.qty || "")}"></td>
-      <td style="min-width:110px" class="bar-cell">${barHtml(ratio)}</td>
-      <td><input type="number" class="pct-input ${pctClass(ratio)}" data-eq-field="pct" min="0" max="100" step="0.1" value="${(ratio * 100).toFixed(1)}"></td>
       <td><input type="date" data-eq-field="due" value="${toDateInput(eq.stages[0].due)}"></td>
-      <td class="high-count">${highOpen(items)}</td>
-      <td><select class="s-${st}" data-eq-field="status">${optionHtml(STATUS_OPTS, st)}</select></td>
       <td><input type="text" data-eq-field="owner" value="${escapeAttr(eq.owner || "")}"></td>
+      ${stageCells}
       <td><button type="button" class="btn-del icon-only" data-del-eq="${ei}" title="刪除設備" aria-label="刪除設備">🗑</button></td>
     </tr>`;
     const card = `<article class="m-eq-card" data-eq-idx="${ei}">
@@ -2141,11 +2169,9 @@ function buildEquipmentMasterHtml() {
       <div class="m-field"><label>製程段</label><select class="seg-select ${eq.seg}" data-eq-field="seg">${optionHtml(DATA.segOrder, eq.seg)}</select></div>
       <div class="m-field"><label>設備</label><input type="text" data-eq-field="name" value="${escapeAttr(eq.name || "")}"></div>
       <div class="m-field"><label>數量</label><input type="text" class="qty-input" data-eq-field="qty" value="${escapeAttr(eq.qty || "")}"></div>
-      <div class="m-field"><label>完成率</label><div>${barHtml(ratio)}<input type="number" class="pct-input ${pctClass(ratio)}" data-eq-field="pct" min="0" max="100" step="0.1" value="${(ratio * 100).toFixed(1)}" style="margin-top:8px"></div></div>
       <div class="m-field"><label>預計完成</label><input type="date" data-eq-field="due" value="${toDateInput(eq.stages[0].due)}"></div>
-      <div class="m-field"><label>高急迫</label><div class="high-count">${highOpen(items)}</div></div>
-      <div class="m-field"><label>狀態</label><select class="s-${st}" data-eq-field="status">${optionHtml(STATUS_OPTS, st)}</select></div>
       <div class="m-field"><label>Owner</label><input type="text" data-eq-field="owner" value="${escapeAttr(eq.owner || "")}"></div>
+      <div class="m-field"><label>適用階段</label><div class="stage-on-chips">${stageChips}</div></div>
       <button type="button" class="btn-del icon-only" data-del-eq="${ei}" title="刪除設備" aria-label="刪除設備">🗑</button>
     </article>`;
     return { row, card };
@@ -2155,18 +2181,18 @@ function buildEquipmentMasterHtml() {
   return `
     ${chipsToolbar("")}
     <div class="section-head">
-      <h2 class="section-title">全部設備｜主檔維護</h2>
+      <h2 class="section-title">設備設定（含適用階段）</h2>
       <button type="button" class="btn-add-eq icon-only" data-add-eq title="新增設備" aria-label="新增設備">＋</button>
     </div>
     <div class="m-eq-cards">${mCards}</div>
     <div class="scroll desktop-table"><table class="edit-table">
       <thead><tr>
-        <th class="col-idx">項次</th><th>製程段</th><th>設備名稱</th><th>數量</th><th>完成率</th><th></th>
-        <th>預計完成</th><th>急迫性高</th><th>目前狀態</th><th>Owner</th><th></th>
+        <th class="col-idx">項次</th><th>製程段</th><th>設備名稱</th><th>數量</th>
+        <th>預計完成</th><th>Owner</th>${stageHeads}<th></th>
       </tr></thead>
-      <tbody>${rows || `<tr><td colspan="11">沒有符合的設備，可按「新增」</td></tr>`}</tbody>
+      <tbody>${rows || `<tr><td colspan="${colCount}">沒有符合的設備，可按「新增」</td></tr>`}</tbody>
     </table></div>
-    <p class="note">可改項次、製程段、名稱、數量、完成率、日期、狀態、Owner；右鍵可複製／貼上設備。完成率／狀態會套用到該設備「架線前準備」細項。</p>`;
+    <p class="note">同一列可改主檔並勾選適用階段（預設全選，至少保留一個）。右鍵可複製／貼上設備。完成率請在「工作項目清單」更新。</p>`;
 }
 
 function renderOverview() {
@@ -2650,56 +2676,36 @@ function renderSettings() {
     }).join("");
     return `<tr><th>${escapeHtml(m.seg)}</th>${cells}</tr>`;
   }).join("");
-  const stageOnHead = DATA.stages.map(s =>
-    `<th title="${escapeAttr(s.name)}">${escapeHtml(s.mark || s.name)}</th>`
-  ).join("");
-  const stageOnBody = (DATA.equipment || []).map((eq, ei) => {
-    ensureStageOn(eq);
-    const cells = DATA.stages.map((s, si) =>
-      `<td><input type="checkbox" data-eq-stage-on="${ei}" data-stage-i="${si}" ${eq.stageOn[si] ? "checked" : ""} title="${escapeAttr((eq.name || "") + "｜" + s.name)}"></td>`
-    ).join("");
-    const label = ((eq.idx != null && eq.idx !== "" ? eq.idx + " " : "") + (eq.name || "")).trim() || ("設備 " + (ei + 1));
-    return `<tr>
-      <td class="eq-name"><div>${escapeHtml(label)}</div><div class="sub">${escapeHtml(eq.seg || "")}</div></td>
-      ${cells}
-    </tr>`;
-  }).join("");
   document.getElementById("settings").innerHTML = `
     ${cloudBarHtml()}
-    <p class="note">此頁維護設備主檔、製程段、五階段、適用階段勾選，以及各製程段×階段時程。變更寫入本機；要同步雲端請按「儲存」。</p>
-    <div class="settings-grid">
+    <p class="note">設定已整合：上方維護製程段／架線階段名稱，中間一張表同時設設備主檔與適用階段，下方設各製程段時程。變更寫入本機；同步雲端請按「儲存」。</p>
+    <div class="settings-unified">
+      <div class="settings-structure">
+        <section class="settings-panel">
+          <h2>① 設備製程段</h2>
+          <p class="hint">篩選列用的製程段：可新增、刪除、插入、重新命名與排序。</p>
+          <div class="set-toolbar">
+            <button type="button" data-set-seg-add>＋ 新增製程段</button>
+          </div>
+          ${segRows || `<p class="note">尚無製程段</p>`}
+        </section>
+        <section class="settings-panel">
+          <h2>② 架線階段</h2>
+          <p class="hint">清單／甘特用的階段；簡稱顯示於設備表勾選欄與 KPI。</p>
+          <div class="set-toolbar">
+            <button type="button" data-set-stage-add>＋ 新增階段</button>
+          </div>
+          ${stageRows || `<p class="note">尚無階段</p>`}
+        </section>
+      </div>
       <section class="settings-panel full">
-        <h2>設備主檔</h2>
-        <p class="hint">原「架線周報」內的設備設定表已移至此。可新增／刪除／改名／改製程段；列上右鍵可複製、貼上設備。</p>
+        <h2>③ 設備設定表單</h2>
+        <p class="hint">同一張表：項次／製程段／名稱／數量／日期／Owner，右側勾選該設備適用哪些階段。</p>
         ${buildEquipmentMasterHtml()}
       </section>
-      <section class="settings-panel">
-        <h2>設備製程段</h2>
-        <p class="hint">對應篩選列：全部／板階段／組裝段／測試段…可新增、刪除、插入、重新命名與排序。</p>
-        <div class="set-toolbar">
-          <button type="button" data-set-seg-add>＋ 新增製程段</button>
-        </div>
-        ${segRows || `<p class="note">尚無製程段</p>`}
-      </section>
-      <section class="settings-panel">
-        <h2>架線階段</h2>
-        <p class="hint">對應清單頁階段按鈕；可增刪插改與排序。簡稱用於 KPI 延誤拆解顯示。</p>
-        <div class="set-toolbar">
-          <button type="button" data-set-stage-add>＋ 新增階段</button>
-        </div>
-        ${stageRows || `<p class="note">尚無階段</p>`}
-      </section>
       <section class="settings-panel full">
-        <h2>各設備適用階段</h2>
-        <p class="hint">預設全選。例如送板機可只勾「架線前準備」「架機」；甘特圖與清單頁只顯示已勾階段。至少保留一個。</p>
-        <div class="scroll"><table class="stage-on-table">
-          <thead><tr><th>設備</th>${stageOnHead}</tr></thead>
-          <tbody>${stageOnBody || `<tr><td colspan="${1 + DATA.stages.length}">尚無設備</td></tr>`}</tbody>
-        </table></div>
-      </section>
-      <section class="settings-panel full">
-        <h2>各製程段 × 階段時程</h2>
-        <p class="hint">每個階段需設定「預計開始」「預計完成」。會同步到總覽頁時程表；設備細項日期仍可個別調整。</p>
+        <h2>④ 各製程段 × 階段時程</h2>
+        <p class="hint">每個製程段×階段的預計開始／完成；會同步到總覽與甘特。</p>
         <div class="scroll"><table class="mile-matrix">
           <thead><tr><th>製程段</th>${mileHead}</tr></thead>
           <tbody>${mileBody || `<tr><td colspan="${1 + DATA.stages.length}">請先新增製程段與階段</td></tr>`}</tbody>
