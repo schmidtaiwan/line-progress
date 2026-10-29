@@ -278,13 +278,16 @@
   }
   .gantt-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .gantt-grid {
-    min-width: 720px;
+    min-width: 980px;
     display: grid;
-    grid-template-columns: 168px 1fr;
-    gap: 6px 10px;
+    grid-template-columns: 148px 64px 72px 52px 72px minmax(360px, 1fr);
+    gap: 6px 8px;
     align-items: center;
   }
-  .gantt-axis-label { font-size: 12px; color: var(--muted); }
+  .gantt-axis-label, .gantt-meta-h {
+    font-size: 11px; color: var(--muted); font-weight: 650;
+  }
+  .gantt-meta-h { text-align: center; }
   .gantt-axis {
     position: relative; height: 22px;
     border-bottom: 1px solid var(--line);
@@ -300,6 +303,16 @@
   }
   .gantt-label.overall { font-weight: 700; color: #16324a; }
   .gantt-label .sub { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
+  .gantt-meta {
+    font-size: 12px; text-align: center; font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .gantt-meta.owner { text-align: left; padding-left: 2px; }
+  .gantt-meta .pct { font-weight: 700; }
+  .gantt-meta .s-延誤中 { color: var(--delay); font-weight: 700; }
+  .gantt-meta .s-進行中 { color: var(--run); font-weight: 650; }
+  .gantt-meta .s-已完成 { color: var(--done); font-weight: 650; }
+  .gantt-meta .delay-hot { color: var(--delay); font-weight: 700; }
   .gantt-track {
     position: relative; height: 28px;
     background: #f3f6f9;
@@ -1128,7 +1141,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 15;
+const PAGE_BUILD = 16;
 const PAGE_DATE = "2026-10-29";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1693,7 +1706,18 @@ function renderLineGanttHtml() {
     </div>`;
   }).join("");
 
+  const allItemsOf = eq => (eq.stages || []).flatMap(st => st.items || []);
+  let overallPctSum = 0;
+  let overallPctN = 0;
+  let overallDelay = 0;
   const eqRows = eqList.map(eq => {
+    const items = allItemsOf(eq);
+    const ratio = ratioOf(items);
+    const stName = statusSelectValue(items, ratio);
+    const delays = delayCount(eq);
+    overallPctSum += ratio;
+    overallPctN += 1;
+    overallDelay += delays;
     const bars = stages.map((s, si) => {
       const sp = stageSpanForEq(eq, si);
       if (!sp) return "";
@@ -1704,8 +1728,18 @@ function renderLineGanttHtml() {
       </div>`;
     }).join("");
     return `<div class="gantt-label" title="${escapeAttr((eq.idx || "") + " " + (eq.name || ""))}">${escapeHtml(eq.idx || "")} ${escapeHtml(eq.name || "")}<span class="sub">${escapeHtml(eq.seg || "")}</span></div>
+      <div class="gantt-meta"><span class="pct ${pctClass(ratio)}">${pctText(ratio)}</span></div>
+      <div class="gantt-meta"><span class="s-${stName}">${escapeHtml(stName)}</span></div>
+      <div class="gantt-meta ${delays ? "delay-hot" : ""}">${delays}</div>
+      <div class="gantt-meta owner" title="${escapeAttr(eq.owner || "-")}">${escapeHtml(eq.owner || "-")}</div>
       <div class="gantt-track">${todayHtml}${bars}</div>`;
   }).join("");
+
+  const overallRatio = overallPctN ? overallPctSum / overallPctN : 0;
+  const overallStatus = statusSelectValue(
+    eqList.flatMap(allItemsOf),
+    overallRatio
+  );
 
   return `<section class="gantt-wrap">
     <div class="gantt-head">
@@ -1714,10 +1748,18 @@ function renderLineGanttHtml() {
     </div>
     <div class="gantt-scroll"><div class="gantt-grid">
       <div class="gantt-axis-label">項目</div>
+      <div class="gantt-meta-h">完成度</div>
+      <div class="gantt-meta-h">目前狀態</div>
+      <div class="gantt-meta-h">延誤數</div>
+      <div class="gantt-meta-h">OWNER</div>
       <div class="gantt-axis">${axisMarks.join("")}</div>
       <div class="gantt-label overall">整線（五階段）</div>
+      <div class="gantt-meta"><span class="pct ${pctClass(overallRatio)}">${pctText(overallRatio)}</span></div>
+      <div class="gantt-meta"><span class="s-${overallStatus}">${escapeHtml(overallStatus)}</span></div>
+      <div class="gantt-meta ${overallDelay ? "delay-hot" : ""}">${overallDelay}</div>
+      <div class="gantt-meta owner">—</div>
       <div class="gantt-track overall">${todayHtml}${overallBars}</div>
-      ${eqRows || `<div class="gantt-label">—</div><div class="note">沒有符合的設備</div>`}
+      ${eqRows || `<div class="gantt-label">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="note">沒有符合的設備</div>`}
     </div></div>
   </section>`;
 }
