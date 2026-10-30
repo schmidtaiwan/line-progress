@@ -119,47 +119,93 @@
     }];
   }
 
+  function parentIdOrRoot(folderId) {
+    return (!folderId || folderId === "root") ? "root" : folderId;
+  }
+
+  function parentQueryClause(folderId) {
+    return " and '" + parentIdOrRoot(folderId) + "' in parents";
+  }
+
   function fetchJsonInFolder(folderId, name) {
     const safe = String(name || "").replace(/'/g, "\\'");
-    let q = "name='" + safe + "' and trashed=false";
-    if (folderId && folderId !== "root") q += " and '" + folderId + "' in parents";
+    const q = "name='" + safe + "' and trashed=false" + parentQueryClause(folderId);
     return driveListByQuery(q).then(function (files) {
       if (!files.length) return null;
       return fetchJsonById(files[0].id);
     });
   }
 
+  function trashDriveFile(fileId) {
+    if (!fileId) return Promise.resolve();
+    return driveFetch(
+      "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?supportsAllDrives=true",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trashed: true })
+      }
+    ).then(function () { return null; }).catch(function () { return null; });
+  }
+
+  function createJsonInFolder(folderId, name, body) {
+    const meta = {
+      name: name,
+      mimeType: "application/json",
+      parents: [parentIdOrRoot(folderId)]
+    };
+    const boundary = "line_proj_" + Date.now().toString(36);
+    const multipart =
+      "--" + boundary + "\r\n" +
+      "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+      JSON.stringify(meta) + "\r\n" +
+      "--" + boundary + "\r\n" +
+      "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+      body + "\r\n" +
+      "--" + boundary + "--";
+    return driveFetch(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name",
+      {
+        method: "POST",
+        headers: { "Content-Type": "multipart/related; boundary=" + boundary },
+        body: multipart
+      }
+    ).then(function (res) {
+      if (!res.ok) {
+        return res.text().then(function (t) {
+          throw new Error("建立專案清單失敗 " + res.status + " " + t);
+        });
+      }
+      return res.json();
+    });
+  }
+
   function putJsonInFolder(folderId, name, payload) {
     const body = JSON.stringify(payload);
     const safe = String(name || "").replace(/'/g, "\\'");
-    let q = "name='" + safe + "' and trashed=false";
-    if (folderId && folderId !== "root") q += " and '" + folderId + "' in parents";
+    const q = "name='" + safe + "' and trashed=false" + parentQueryClause(folderId);
     return driveListByQuery(q).then(function (files) {
-      if (files.length) {
-        return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + files[0].id + "?uploadType=media", {
+      if (!files.length) return createJsonInFolder(folderId, name, body);
+      const fileId = files[0].id;
+      return driveFetch(
+        "https://www.googleapis.com/upload/drive/v3/files/" + encodeURIComponent(fileId) +
+        "?uploadType=media&supportsAllDrives=true",
+        {
           method: "PATCH",
           headers: { "Content-Type": "application/json; charset=utf-8" },
           body: body
-        }).then(function (res) {
-          if (!res.ok) return res.text().then(function (t) { throw new Error("寫入專案清單失敗 " + res.status + " " + t); });
-          return files[0];
+        }
+      ).then(function (res) {
+        if (res.ok) return files[0];
+        return res.text().then(function (t) {
+          // 舊檔無權限／損壞：丟進垃圾桶後重建
+          if (res.status === 403 || res.status === 404) {
+            return trashDriveFile(fileId).then(function () {
+              return createJsonInFolder(folderId, name, body);
+            });
+          }
+          throw new Error("寫入專案清單失敗 " + res.status + " " + t);
         });
-      }
-      const meta = { name: name, mimeType: "application/json" };
-      if (folderId && folderId !== "root") meta.parents = [folderId];
-      return driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(meta)
-      }).then(function (res) {
-        if (!res.ok) return res.text().then(function (t) { throw new Error("建立專案清單失敗 " + res.status + " " + t); });
-        return res.json();
-      }).then(function (f) {
-        return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + f.id + "?uploadType=media", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json; charset=utf-8" },
-          body: body
-        }).then(function () { return f; });
       });
     });
   }
@@ -760,13 +806,14 @@
   }
 
   function isScopeError(text) {
-    return /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions|insufficient authentication scopes/i.test(text || "");
+    return /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions|insufficient authentication scopes|insufficientFilePermissions|寫入專案清單失敗 403|建立專案清單失敗 403|建立資料夾失敗 403/i.test(text || "");
   }
 
   function withScopeRetry(fn) {
     return fn().catch(function (err) {
       const msg = String(err && err.message || err);
-      if (!isScopeError(msg)) throw err;
+      // 403：多半是舊 token 只有 drive.file，對既有資料夾無法寫入 → 強制重新同意完整 drive
+      if (!isScopeError(msg) && !/\b403\b/.test(msg)) throw err;
       state.token = "";
       return requestToken("consent", accountHint()).then(function () {
         return fetchUserEmail(state.token);

@@ -1379,7 +1379,7 @@ const STATUS_OPTS = ["未開始", "進行中", "延誤中", "已完成"];
 const REQUIRE_CLOUD_LOGIN = true;
 const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, weeklyPanel: "gantt", projects: [], project: null };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1390,7 +1390,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 36;
+const PAGE_BUILD = 37;
 const PAGE_DATE = "2026-10-30";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1521,7 +1521,18 @@ function renderProjectRail() {
   if (!host) return;
   const list = state.projects || [];
   const curId = state.project && state.project.id;
+  if (state.projectsLoading) {
+    host.innerHTML = `<p class="rail-hint">載入專案中…</p>`;
+    return;
+  }
   if (!list.length) {
+    if (isCloudLoggedIn()) {
+      const err = state.projectsError
+        ? `<p class="rail-hint" style="color:#b91c1c">${escapeHtml(state.projectsError)}</p>`
+        : `<p class="rail-hint">尚無專案清單</p>`;
+      host.innerHTML = err + `<button type="button" class="proj-btn" data-retry-projects>重新載入專案</button>`;
+      return;
+    }
     host.innerHTML = `<p class="rail-hint">登入後載入專案</p>`;
     return;
   }
@@ -1534,12 +1545,29 @@ function renderProjectRail() {
 async function ensureProjectsLoaded() {
   if (!window.LineOneDrive || !isCloudLoggedIn()) return;
   if (typeof LineOneDrive.loadProjectsIndex !== "function") return;
-  const list = await LineOneDrive.loadProjectsIndex();
-  state.projects = list || [];
-  const remembered = readRememberedProjectId();
-  let cur = state.projects.find(p => p.id === remembered) || state.projects[0];
-  if (!cur) return;
-  await activateProject(cur, { skipConfirm: true, fromCloud: true });
+  if (state.projectsLoading) return;
+  state.projectsLoading = true;
+  state.projectsError = "";
+  renderProjectRail();
+  try {
+    const list = await LineOneDrive.loadProjectsIndex();
+    state.projects = list || [];
+    state.projectsError = "";
+    const remembered = readRememberedProjectId();
+    let cur = state.projects.find(p => p.id === remembered) || state.projects[0];
+    if (!cur) {
+      renderProjectRail();
+      return;
+    }
+    await activateProject(cur, { skipConfirm: true, fromCloud: true });
+  } catch (e) {
+    console.warn(e);
+    state.projectsError = String((e && e.message) || e || "載入失敗");
+    toast("專案清單載入失敗：" + state.projectsError);
+    renderProjectRail();
+  } finally {
+    state.projectsLoading = false;
+  }
 }
 
 async function activateProject(proj, opts) {
@@ -1611,10 +1639,16 @@ async function addNewProject() {
     toast("建立專案「" + label + "」…");
     const proj = await LineOneDrive.createProject(label);
     state.projects = await LineOneDrive.loadProjectsIndex();
+    state.projectsError = "";
     await activateProject(proj, { skipConfirm: true, fromCloud: true, resetToBlank: true });
   } catch (e) {
     console.error(e);
-    toast("建立失敗：" + (e.message || e));
+    const msg = String((e && e.message) || e);
+    if (/\b403\b|insufficient/i.test(msg)) {
+      toast("建立失敗：雲端權限不足。請按「重新登入」完整授權後再新增");
+    } else {
+      toast("建立失敗：" + msg);
+    }
   }
 }
 /** 比對用指紋（忽略 savedAt，避免時間戳造成誤判） */
@@ -4035,6 +4069,10 @@ document.body.addEventListener("click", ev => {
   }
   if (ev.target.closest("[data-add-project]")) {
     addNewProject();
+    return;
+  }
+  if (ev.target.closest("[data-retry-projects]")) {
+    ensureProjectsLoaded().catch(function (e) { console.warn(e); });
     return;
   }
   const projBtn = ev.target.closest("[data-project-id]");
