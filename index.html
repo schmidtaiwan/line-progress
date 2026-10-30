@@ -1366,6 +1366,10 @@
   }
   .project-rail .btn-save-all-proj:hover { background: #163a6b; }
   .project-rail .btn-save-all-proj:disabled { opacity: 0.55; cursor: wait; }
+  .project-rail .btn-add-proj.danger-rail {
+    color: #b91c1c; border-color: #fecaca; background: #fff1f2;
+  }
+  .project-rail .btn-add-proj.danger-rail:hover { background: #ffe4e6; }
   .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   body.locked .project-rail { display: none; }
 </style>
@@ -1374,9 +1378,12 @@
 <div class="app-shell">
 <aside class="project-rail" id="projectRail" aria-label="專案列表">
   <h2 class="rail-title">專案</h2>
-  <p class="rail-hint">點選切換；雲端依專案名稱建資料夾</p>
+  <p class="rail-hint">點選切換；右鍵可複製／刪除／貼上</p>
   <div class="proj-list" id="projectList"></div>
   <button type="button" class="btn-add-proj" data-add-project title="新增專案">＋ 新增專案</button>
+  <button type="button" class="btn-add-proj" data-copy-project title="複製目前專案到剪貼簿">複製專案</button>
+  <button type="button" class="btn-add-proj" data-paste-project title="將已複製專案貼上為新專案">貼上專案</button>
+  <button type="button" class="btn-add-proj danger-rail" data-delete-project title="刪除目前專案（自清單移除）">刪除專案</button>
   <button type="button" class="btn-save-all-proj" data-save-all-projects title="將所有專案的本機進度寫入各自雲端資料夾">全部儲存</button>
 </aside>
 <div class="app-main">
@@ -1479,6 +1486,11 @@
   <button type="button" data-eq-ctx="copy">複製設備</button>
   <button type="button" data-eq-ctx="paste">貼上設備</button>
 </div>
+<div class="date-ctx-menu" id="projCtxMenu" role="menu">
+  <button type="button" data-proj-ctx="copy">複製專案</button>
+  <button type="button" data-proj-ctx="paste">貼上為新專案</button>
+  <button type="button" data-proj-ctx="delete">刪除專案</button>
+</div>
 <div class="photo-preview-mask" id="photoPreviewMask" role="dialog" aria-modal="true" aria-label="照片預覽">
   <div class="photo-preview-box">
     <div class="photo-preview-head">
@@ -1513,7 +1525,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1524,9 +1536,421 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 43;
+const PAGE_BUILD = 44;
 const PAGE_DATE = "2026-10-30";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
+const HIERARCHY_SEED_R02 = {
+  "arch": "hierarchy",
+  "source": "進度表 晶睿TY2 2樓-R02產線電力、CDA及排氣工程20261026R 2.pdf",
+  "title": "R02水電工程｜層級進度",
+  "subtitle": "週次：2026/10/26　｜　晶睿TY2-2樓-R02產線電力／CDA／排氣　｜　層級架構（紅／橘／綠）　｜　整體約17%",
+  "projectName": "R02水電工程",
+  "savedAt": "2026-10-30T11:27:03",
+  "built": "2026/10/30 11:27",
+  "note": "※ 由施工進度表 PDF 匯入層級架構。紅＝第1層專案、橘＝第2層階段、綠＝第3層工作項。",
+  "equipment": [],
+  "milestones": [],
+  "stages": [],
+  "segOrder": [],
+  "nodes": [
+    {
+      "id": "n1",
+      "parentId": "",
+      "level": 1,
+      "name": "晶睿科技股份有限公司TY2廠2樓-R02產線電力、CDA及排氣工程",
+      "days": 59,
+      "pct": 0.17316326530612244,
+      "start": "2026/10/19",
+      "finish": "2026/12/16",
+      "note": "PDF 紅框＝第1層"
+    },
+    {
+      "id": "n2_1",
+      "parentId": "n1",
+      "level": 2,
+      "name": "前置作業",
+      "days": 57,
+      "pct": 0.6571428571428571,
+      "start": "2026/10/19",
+      "finish": "2026/12/14",
+      "note": "PDF 橘框＝第2層"
+    },
+    {
+      "id": "n3_1_1",
+      "parentId": "n2_1",
+      "level": 3,
+      "name": "得標通知及訂單開立(By業主)",
+      "days": 3,
+      "pct": 1.0,
+      "start": "2026/10/19",
+      "finish": "2026/10/21",
+      "note": "By業主"
+    },
+    {
+      "id": "n3_1_2",
+      "parentId": "n2_1",
+      "level": 3,
+      "name": "採購發包作業",
+      "days": 3,
+      "pct": 1.0,
+      "start": "2026/10/20",
+      "finish": "2026/10/22",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_1_3",
+      "parentId": "n2_1",
+      "level": 3,
+      "name": "保險作業",
+      "days": 3,
+      "pct": 1.0,
+      "start": "2026/10/19",
+      "finish": "2026/10/21",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_1_4",
+      "parentId": "n2_1",
+      "level": 3,
+      "name": "配電盤設備送審",
+      "days": 7,
+      "pct": 0.6,
+      "start": "2026/10/22",
+      "finish": "2026/10/28",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_1_5",
+      "parentId": "n2_1",
+      "level": 3,
+      "name": "施工材料備料",
+      "days": 30,
+      "pct": 0.2,
+      "start": "2026/10/21",
+      "finish": "2026/11/19",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_1_6",
+      "parentId": "n2_1",
+      "level": 3,
+      "name": "人員及機具準備",
+      "days": 20,
+      "pct": 0.3,
+      "start": "2026/10/21",
+      "finish": "2026/11/09",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_1_7",
+      "parentId": "n2_1",
+      "level": 3,
+      "name": "人員進場教育訓練及工作證",
+      "days": 55,
+      "pct": 0.5,
+      "start": "2026/10/21",
+      "finish": "2026/12/14",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n2_2",
+      "parentId": "n1",
+      "level": 2,
+      "name": "設備製造",
+      "days": 35,
+      "pct": 0.0,
+      "start": "2026/10/29",
+      "finish": "2026/12/02",
+      "note": "PDF 橘框＝第2層"
+    },
+    {
+      "id": "n3_2_1",
+      "parentId": "n2_2",
+      "level": 3,
+      "name": "配電盤(送審簽認後35天到場)",
+      "days": 35,
+      "pct": 0.0,
+      "start": "2026/10/29",
+      "finish": "2026/12/02",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_2_2",
+      "parentId": "n2_2",
+      "level": 3,
+      "name": "照明燈具(業主提供既有延用)",
+      "days": 5,
+      "pct": 0.0,
+      "start": "2026/11/16",
+      "finish": "2026/11/20",
+      "note": "業主提供既有延用"
+    },
+    {
+      "id": "n2_3",
+      "parentId": "n1",
+      "level": 2,
+      "name": "R10區域（電力／空壓）",
+      "days": 28,
+      "pct": 0.555,
+      "start": "2026/10/22",
+      "finish": "2026/11/18",
+      "note": "PDF 橘框＝第2層"
+    },
+    {
+      "id": "n3_3_1",
+      "parentId": "n2_3",
+      "level": 3,
+      "name": "業主既有移出清空完成(By業主)",
+      "days": 3,
+      "pct": 1.0,
+      "start": "2026/10/22",
+      "finish": "2026/10/24",
+      "note": "By業主"
+    },
+    {
+      "id": "n3_3_2",
+      "parentId": "n2_3",
+      "level": 3,
+      "name": "臨時防護",
+      "days": 1,
+      "pct": 1.0,
+      "start": "2026/10/24",
+      "finish": "2026/10/24",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_3_3",
+      "parentId": "n2_3",
+      "level": 3,
+      "name": "電力照明插座配設",
+      "days": 23,
+      "pct": 0.22,
+      "start": "2026/10/24",
+      "finish": "2026/11/15",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_3_4",
+      "parentId": "n2_3",
+      "level": 3,
+      "name": "空壓配設",
+      "days": 3,
+      "pct": 0.0,
+      "start": "2026/11/16",
+      "finish": "2026/11/18",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n2_4",
+      "parentId": "n1",
+      "level": 2,
+      "name": "R11/R12區域（電力／空壓）",
+      "days": 20,
+      "pct": 0.0,
+      "start": "2026/10/30",
+      "finish": "2026/11/18",
+      "note": "PDF 橘框＝第2層"
+    },
+    {
+      "id": "n3_4_1",
+      "parentId": "n2_4",
+      "level": 3,
+      "name": "業主R11停線R12淨空(By業主)",
+      "days": 1,
+      "pct": 0.0,
+      "start": "2026/10/30",
+      "finish": "2026/10/30",
+      "note": "By業主；R11需停線及R12工區淨空"
+    },
+    {
+      "id": "n3_4_2",
+      "parentId": "n2_4",
+      "level": 3,
+      "name": "臨時防護",
+      "days": 1,
+      "pct": 0.0,
+      "start": "2026/10/31",
+      "finish": "2026/10/31",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_4_3",
+      "parentId": "n2_4",
+      "level": 3,
+      "name": "電力照明插座配設",
+      "days": 15,
+      "pct": 0.0,
+      "start": "2026/11/01",
+      "finish": "2026/11/15",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_4_4",
+      "parentId": "n2_4",
+      "level": 3,
+      "name": "空壓配設",
+      "days": 3,
+      "pct": 0.0,
+      "start": "2026/11/16",
+      "finish": "2026/11/18",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n2_5",
+      "parentId": "n1",
+      "level": 2,
+      "name": "R02前半段（電力／空壓／排氣）",
+      "days": 18,
+      "pct": 0.0,
+      "start": "2026/11/14",
+      "finish": "2026/12/01",
+      "note": "PDF 橘框＝第2層"
+    },
+    {
+      "id": "n3_5_1",
+      "parentId": "n2_5",
+      "level": 3,
+      "name": "業主既有移出清空完成(By業主)",
+      "days": 1,
+      "pct": 0.0,
+      "start": "2026/11/14",
+      "finish": "2026/11/14",
+      "note": "By業主需淨空"
+    },
+    {
+      "id": "n3_5_2",
+      "parentId": "n2_5",
+      "level": 3,
+      "name": "臨時防護",
+      "days": 1,
+      "pct": 0.0,
+      "start": "2026/11/15",
+      "finish": "2026/11/15",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_5_3",
+      "parentId": "n2_5",
+      "level": 3,
+      "name": "電力照明插座配設",
+      "days": 10,
+      "pct": 0.0,
+      "start": "2026/11/19",
+      "finish": "2026/11/28",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_5_4",
+      "parentId": "n2_5",
+      "level": 3,
+      "name": "空壓配設",
+      "days": 3,
+      "pct": 0.0,
+      "start": "2026/11/29",
+      "finish": "2026/12/01",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_5_5",
+      "parentId": "n2_5",
+      "level": 3,
+      "name": "排氣配設",
+      "days": 15,
+      "pct": 0.0,
+      "start": "2026/11/14",
+      "finish": "2026/11/28",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n2_6",
+      "parentId": "n1",
+      "level": 2,
+      "name": "R02後半段（電力／空壓）",
+      "days": 18,
+      "pct": 0.0,
+      "start": "2026/11/28",
+      "finish": "2026/12/15",
+      "note": "PDF 橘框＝第2層"
+    },
+    {
+      "id": "n3_6_1",
+      "parentId": "n2_6",
+      "level": 3,
+      "name": "業主既有移出清空完成(By業主)",
+      "days": 1,
+      "pct": 0.0,
+      "start": "2026/11/28",
+      "finish": "2026/11/28",
+      "note": "By業主需淨空"
+    },
+    {
+      "id": "n3_6_2",
+      "parentId": "n2_6",
+      "level": 3,
+      "name": "臨時防護",
+      "days": 1,
+      "pct": 0.0,
+      "start": "2026/11/29",
+      "finish": "2026/11/29",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_6_3",
+      "parentId": "n2_6",
+      "level": 3,
+      "name": "電力照明插座配設",
+      "days": 15,
+      "pct": 0.0,
+      "start": "2026/11/28",
+      "finish": "2026/12/12",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_6_4",
+      "parentId": "n2_6",
+      "level": 3,
+      "name": "空壓配設",
+      "days": 3,
+      "pct": 0.0,
+      "start": "2026/12/13",
+      "finish": "2026/12/15",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n2_7",
+      "parentId": "n1",
+      "level": 2,
+      "name": "竣工驗收",
+      "days": 7,
+      "pct": 0.0,
+      "start": "2026/12/10",
+      "finish": "2026/12/16",
+      "note": "PDF 橘框＝第2層"
+    },
+    {
+      "id": "n3_7_1",
+      "parentId": "n2_7",
+      "level": 3,
+      "name": "收尾及竣工",
+      "days": 6,
+      "pct": 0.0,
+      "start": "2026/12/10",
+      "finish": "2026/12/15",
+      "note": "PDF 綠框＝第3層"
+    },
+    {
+      "id": "n3_7_2",
+      "parentId": "n2_7",
+      "level": 3,
+      "name": "缺失改善及驗收",
+      "days": 3,
+      "pct": 0.0,
+      "start": "2026/12/14",
+      "finish": "2026/12/16",
+      "note": "PDF 綠框＝第3層"
+    }
+  ]
+};
 function isMobileView() {
   try {
     if (window.matchMedia && window.matchMedia("(max-width: 900px)").matches) return true;
@@ -1877,6 +2301,27 @@ function syncTitleToProject(proj) {
   DATA.title = proj.name + (hier ? "｜層級進度" : "｜架線進度");
 }
 
+function isBlankHierarchyTemplate() {
+  if (projectArchOf(DATA) !== "hierarchy") return false;
+  const nodes = DATA.nodes || [];
+  if (!nodes.length || nodes.length > 5) return false;
+  return nodes.some(n => n.name === "階段一" || n.name === "工作項 A");
+}
+
+function applyHierarchyPdfSeedSilent() {
+  const saved = (typeof HIERARCHY_SEED_R02 === "object") ? HIERARCHY_SEED_R02 : null;
+  if (!saved || !Array.isArray(saved.nodes)) return false;
+  const name = (state.project && state.project.name) || "R02水電工程";
+  applyProjectPayload(Object.assign({}, saved, {
+    title: name + "｜層級進度",
+    projectName: name,
+    arch: "hierarchy",
+    savedAt: new Date().toISOString()
+  }));
+  if (state.project) state.project.arch = "hierarchy";
+  return true;
+}
+
 async function activateProject(proj, opts) {
   opts = opts || {};
   if (!proj) return;
@@ -1921,12 +2366,25 @@ async function activateProject(proj, opts) {
       if (hasHier || hasEq || (cloud && Array.isArray(cloud.equipment))) {
         applyProjectPayload(cloud);
         if (state.project) state.project.arch = projectArchOf(DATA);
-        syncTitleToProject(proj);
-        state.dirty = false;
-        saveLocal("已載入專案「" + proj.name + "」", { clearDirty: true });
+        // 空白層級範本（階段一／工作項 A）自動套用 PDF 水電進度表
+        if (isBlankHierarchyTemplate() && applyHierarchyPdfSeedSilent()) {
+          syncTitleToProject(proj);
+          await LineOneDrive.uploadJson(cloudPayload());
+          state.dirty = false;
+          saveLocal("已匯入 PDF 層級進度到「" + proj.name + "」", { clearDirty: true });
+        } else {
+          syncTitleToProject(proj);
+          state.dirty = false;
+          saveLocal("已載入專案「" + proj.name + "」", { clearDirty: true });
+        }
       } else if (opts.resetToBlank || !loadedLocal) {
-        applyProjectPayload(blankProjectPayload(proj.name, archHint));
-        if (state.project) state.project.arch = archHint;
+        const wantMepSeed = archHint === "hierarchy" && /水電|R02/i.test(String(proj.name || ""));
+        if (wantMepSeed && applyHierarchyPdfSeedSilent()) {
+          // 水電／R02 層級專案新建時帶入 PDF 種子
+        } else {
+          applyProjectPayload(blankProjectPayload(proj.name, archHint));
+        }
+        if (state.project) state.project.arch = projectArchOf(DATA) || archHint;
         syncTitleToProject(proj);
         await LineOneDrive.uploadJson(cloudPayload());
         state.dirty = false;
@@ -3047,6 +3505,7 @@ function renderHierarchySettings() {
     <p class="note">第1層＝專案（紅）、第2層＝階段（橘）、第3層＝工作項（綠）。編輯後按「儲存本專案」寫入雲端。</p>
     <div class="toolbar" style="margin-bottom:10px">
       <button type="button" class="btn-cloud" data-hier-rollup>依下層重算完成率</button>
+      <button type="button" class="btn-cloud" data-hier-import-pdf title="匯入晶睿TY2 R02 電力／CDA／排氣進度表">匯入 PDF 水電進度表</button>
     </div>
     <div class="scroll desktop-table"><table class="hier-table">
       <thead><tr>
@@ -3932,6 +4391,198 @@ function hideDateCtxMenu() {
 }
 
 const EQ_CLIP_KEY = STORE_KEY + "_eq_clip";
+const PROJ_CLIP_KEY = "vivo_line_dash_project_clip";
+
+function hideProjCtxMenu() {
+  const menu = document.getElementById("projCtxMenu");
+  if (menu) menu.classList.remove("show");
+  state.projCtxTarget = null;
+}
+
+function readProjectClipboard() {
+  if (state.projectClipboard && state.projectClipboard.payload) return state.projectClipboard;
+  try {
+    const raw = sessionStorage.getItem(PROJ_CLIP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.payload) {
+      state.projectClipboard = parsed;
+      return parsed;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function writeProjectClipboard(clip) {
+  if (!clip) {
+    state.projectClipboard = null;
+    try { sessionStorage.removeItem(PROJ_CLIP_KEY); } catch (e) {}
+    return null;
+  }
+  state.projectClipboard = clip;
+  try { sessionStorage.setItem(PROJ_CLIP_KEY, JSON.stringify(clip)); } catch (e) {}
+  return clip;
+}
+
+async function copyCurrentProject(projOpt) {
+  const proj = projOpt || state.project;
+  if (!proj || isProjectsOverview()) {
+    toast("請先選擇要複製的專案");
+    return false;
+  }
+  // 先把目前畫面寫入本機，再組 payload
+  if (state.project && state.project.id === proj.id) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
+  }
+  let payload = null;
+  if (state.project && state.project.id === proj.id) {
+    if (isHierarchyArch()) rollupHierarchyPct();
+    payload = cloudPayload();
+  } else {
+    try {
+      const raw = localStorage.getItem(storeKeyForProject(proj));
+      if (raw) payload = JSON.parse(raw);
+    } catch (e) {}
+    if (!payload && isCloudLoggedIn() && window.LineOneDrive) {
+      try {
+        const prev = LineOneDrive.getActiveProject && LineOneDrive.getActiveProject();
+        LineOneDrive.setActiveProject(proj);
+        payload = await LineOneDrive.downloadJson();
+        if (prev) LineOneDrive.setActiveProject(prev);
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+  }
+  if (!payload) {
+    toast("找不到專案資料可複製");
+    return false;
+  }
+  writeProjectClipboard({
+    name: proj.name,
+    arch: projectArchOf(payload) || proj.arch || "equipment",
+    payload: payload,
+    copiedAt: new Date().toISOString()
+  });
+  toast("已複製專案「" + proj.name + "」");
+  return true;
+}
+
+async function pasteProjectAsNew() {
+  if (!isCloudLoggedIn()) {
+    toast("請先登入 Google");
+    return;
+  }
+  const clip = readProjectClipboard();
+  if (!clip || !clip.payload) {
+    toast("尚無已複製專案，請先按「複製專案」");
+    return;
+  }
+  const suggested = (clip.name || "專案") + " 副本";
+  const label = prompt("貼上為新專案名稱", suggested);
+  if (label == null) return;
+  const name = String(label).trim();
+  if (!name) {
+    toast("名稱不可空白");
+    return;
+  }
+  try {
+    toast("正在貼上專案「" + name + "」…");
+    const proj = await LineOneDrive.duplicateProject(
+      { name: clip.name, arch: clip.arch },
+      name,
+      clip.payload
+    );
+    state.projects = await LineOneDrive.loadProjectsIndex();
+    await activateProject(proj, { skipConfirm: true, fromCloud: true, arch: clip.arch });
+    toast("已貼上新專案「" + proj.name + "」");
+  } catch (e) {
+    console.error(e);
+    toast("貼上失敗：" + ((e && e.message) || e));
+  }
+}
+
+async function deleteCurrentProject(projOpt) {
+  if (!isCloudLoggedIn()) {
+    toast("請先登入 Google");
+    return;
+  }
+  const proj = projOpt || state.project;
+  if (!proj || isProjectsOverview()) {
+    toast("請先選擇要刪除的專案");
+    return;
+  }
+  if (!confirm("確定從專案清單刪除「" + proj.name + "」？\n（雲端資料夾不會自動清除）")) return;
+  try {
+    toast("正在刪除「" + proj.name + "」…");
+    const wasActive = state.project && state.project.id === proj.id;
+    const list = await LineOneDrive.deleteProject(proj.id);
+    state.projects = list || [];
+    try { localStorage.removeItem(storeKeyForProject(proj)); } catch (e) {}
+    if (wasActive) {
+      state.project = null;
+      if (state.projects.length) {
+        await activateProject(state.projects[0], { skipConfirm: true, fromCloud: true });
+      } else {
+        rememberActiveProjectId("");
+        renderProjectRail();
+        toast("已刪除，目前無專案");
+        return;
+      }
+    } else {
+      renderProjectRail();
+    }
+    toast("已刪除專案「" + proj.name + "」");
+  } catch (e) {
+    console.error(e);
+    toast("刪除失敗：" + ((e && e.message) || e));
+  }
+}
+
+function showProjCtxMenu(x, y, projId) {
+  const menu = document.getElementById("projCtxMenu");
+  if (!menu) return;
+  hideEqCtxMenu();
+  hideDateCtxMenu();
+  state.projCtxTarget = projId || null;
+  const clip = readProjectClipboard();
+  const pasteBtn = menu.querySelector('[data-proj-ctx="paste"]');
+  if (pasteBtn) {
+    pasteBtn.disabled = !clip;
+    pasteBtn.style.opacity = clip ? "1" : "0.55";
+    pasteBtn.title = clip ? ("貼上「" + (clip.name || "專案") + "」為新專案") : "尚無已複製專案";
+  }
+  positionCtxMenu(menu, x, y);
+}
+
+async function importHierarchyPdfSeed() {
+  if (!isHierarchyArch()) {
+    toast("請先開啟層級架構專案");
+    return;
+  }
+  if (!confirm("匯入晶睿TY2 R02 水電進度表（PDF）到目前層級專案？\n會覆寫目前 nodes。")) return;
+  let saved = null;
+  try {
+    const res = await fetch("./seeds/" + encodeURIComponent("R02水電工程_hierarchy.json") + "?v=" + PAGE_BUILD);
+    if (res.ok) saved = await res.json();
+  } catch (e) {}
+  if (!saved && typeof HIERARCHY_SEED_R02 === "object") saved = HIERARCHY_SEED_R02;
+  if (!saved || !Array.isArray(saved.nodes)) {
+    toast("找不到 PDF 層級種子資料");
+    return;
+  }
+  const name = (state.project && state.project.name) || "R02水電工程";
+  const payload = Object.assign({}, saved, {
+    title: name + "｜層級進度",
+    projectName: name,
+    arch: "hierarchy"
+  });
+  applyProjectPayload(payload);
+  if (state.project) state.project.arch = "hierarchy";
+  state.dirty = true;
+  saveLocal("已匯入 PDF 層級進度表（尚未寫入雲端）");
+  render();
+}
 
 function hideEqCtxMenu() {
   const menu = document.getElementById("eqCtxMenu");
@@ -4969,6 +5620,33 @@ document.body.addEventListener("click", ev => {
     addNewProject();
     return;
   }
+  if (ev.target.closest("[data-copy-project]")) {
+    copyCurrentProject();
+    return;
+  }
+  if (ev.target.closest("[data-paste-project]")) {
+    pasteProjectAsNew();
+    return;
+  }
+  if (ev.target.closest("[data-delete-project]")) {
+    deleteCurrentProject();
+    return;
+  }
+  const projCtx = ev.target.closest("[data-proj-ctx]");
+  if (projCtx) {
+    const act = projCtx.dataset.projCtx;
+    const pid = state.projCtxTarget;
+    hideProjCtxMenu();
+    const proj = pid ? (state.projects || []).find(p => p.id === pid) : state.project;
+    if (act === "copy") copyCurrentProject(proj);
+    else if (act === "paste") pasteProjectAsNew();
+    else if (act === "delete") deleteCurrentProject(proj);
+    return;
+  }
+  if (ev.target.closest("[data-hier-import-pdf]")) {
+    importHierarchyPdfSeed();
+    return;
+  }
   if (ev.target.closest("[data-np-cancel]") || ev.target === document.getElementById("newProjectModal")) {
     closeNewProjectModal();
     return;
@@ -5247,6 +5925,12 @@ document.body.addEventListener("dblclick", ev => {
 });
 
 document.body.addEventListener("contextmenu", ev => {
+  const projHit = ev.target.closest("[data-project-id]");
+  if (projHit) {
+    ev.preventDefault();
+    showProjCtxMenu(ev.clientX, ev.clientY, projHit.dataset.projectId);
+    return;
+  }
   const dateInput = resolveDateInputFromEvent(ev);
   if (dateInput) {
     ev.preventDefault();
@@ -5306,6 +5990,9 @@ document.body.addEventListener("mousedown", ev => {
   }
   const onDateUi = ev.target.closest("#dateCtxMenu, input[type='date'], .date-hit, .date-cell, [data-toggle-dates], .date-drop");
   if (!onDateUi) hideDateCtxMenu();
+  if (!ev.target.closest("#projCtxMenu") && !ev.target.closest("[data-project-id]")) {
+    hideProjCtxMenu();
+  }
   const onEqUi = ev.target.closest("#eqCtxMenu");
   if (!onEqUi) hideEqCtxMenu();
 }, true);

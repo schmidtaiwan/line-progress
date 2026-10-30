@@ -232,6 +232,7 @@
                   id: String(p.id || p.name || ""),
                   name: String(p.name || "未命名"),
                   folderPath: String(p.folderPath || projectsRootParts().concat([sanitizeProjectFolderName(p.name)]).join("/")),
+                  arch: p.arch === "hierarchy" ? "hierarchy" : "equipment",
                   legacyFallback: !!p.legacyFallback,
                   legacyFolderPath: p.legacyFolderPath || "",
                   legacyFileName: p.legacyFileName || "",
@@ -286,6 +287,51 @@
         // 先切到新專案並確保資料夾存在
         setActiveProject(proj);
         return ensureFolderId().then(function () { return proj; });
+      });
+    });
+  }
+
+  function deleteProject(projectId) {
+    const id = String(projectId || "");
+    if (!id) return Promise.reject(new Error("缺少專案 ID"));
+    return loadProjectsIndex().then(function (list) {
+      const next = list.filter(function (p) { return p.id !== id; });
+      if (next.length === list.length) {
+        throw new Error("找不到要刪除的專案");
+      }
+      return saveProjectsIndex(next).then(function () { return next; });
+    });
+  }
+
+  function uniqueProjectName(base, list) {
+    const names = {};
+    (list || []).forEach(function (p) { names[String(p.name || "")] = true; });
+    let label = String(base || "專案副本").trim() || "專案副本";
+    if (!names[label]) return label;
+    let i = 2;
+    while (names[label + " (" + i + ")"]) i += 1;
+    return label + " (" + i + ")";
+  }
+
+  /** 複製專案：新建名稱＋資料夾，可選寫入 payload */
+  function duplicateProject(sourceProj, newName, payload) {
+    const src = sourceProj || {};
+    const arch = (payload && payload.arch === "hierarchy") || src.arch === "hierarchy"
+      ? "hierarchy" : "equipment";
+    return loadProjectsIndex().then(function (list) {
+      const label = uniqueProjectName(newName || ((src.name || "專案") + " 副本"), list);
+      return createProject(label, { arch: arch }).then(function (proj) {
+        if (!payload) return proj;
+        const body = Object.assign({}, payload, {
+          projectId: proj.id,
+          projectName: proj.name,
+          savedAt: new Date().toISOString()
+        });
+        if (body.title) {
+          body.title = String(body.title).replace(String(src.name || ""), proj.name);
+        }
+        setActiveProject(proj);
+        return uploadJson(body).then(function () { return proj; });
       });
     });
   }
@@ -1174,6 +1220,9 @@
     loadProjectsIndex: loadProjectsIndex,
     saveProjectsIndex: saveProjectsIndex,
     createProject: createProject,
+    deleteProject: deleteProject,
+    duplicateProject: duplicateProject,
+    uniqueProjectName: uniqueProjectName,
     sanitizeProjectFolderName: sanitizeProjectFolderName
   };
 
