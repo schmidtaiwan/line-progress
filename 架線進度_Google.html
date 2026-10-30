@@ -1326,13 +1326,16 @@
       <div class="top-actions">
         <button type="button" class="btn-settings-top" data-open-settings title="製程段／階段／時程設定">⚙ 設定</button>
         <div class="import-wrap">
-          <button type="button" class="btn-import-top" data-import-menu title="匯入 Excel 或雲端歷史">📥 匯入 ▾</button>
+          <button type="button" class="btn-import-top" data-import-menu title="匯入 Excel／JSON／雲端歷史">📥 匯入 ▾</button>
           <div class="import-menu" id="importMenu">
             <button type="button" data-import-xlsx>📊 匯入 Excel</button>
+            <button type="button" data-import-json title="匯入 line_data.json（會覆寫目前專案）">📄 匯入專案 JSON</button>
+            <button type="button" data-import-mep-seed title="載入晶睿TY2 R02 電力／CDA／排氣進度表（覆寫目前專案）">⚡ 匯入水電工程進度表</button>
             <button type="button" data-import-history>☁ 匯入雲端歷史</button>
           </div>
         </div>
         <input type="file" id="importXlsxInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+        <input type="file" id="importJsonInput" accept=".json,application/json" hidden>
         <div class="export-wrap">
           <button type="button" class="btn-export-top" data-export-menu title="匯出到本機／雲端歷史">📤 匯出 ▾</button>
           <div class="export-menu" id="exportMenu">
@@ -1432,7 +1435,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 40;
+const PAGE_BUILD = 41;
 const PAGE_DATE = "2026-10-30";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -3865,6 +3868,86 @@ async function exportLocalExcel() {
   }
 }
 
+
+function triggerImportJson() {
+  if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) {
+    toast("請先登入再匯入");
+    return;
+  }
+  if (isProjectsOverview()) {
+    toast("請先進入單一專案再匯入");
+    return;
+  }
+  const input = document.getElementById("importJsonInput");
+  if (!input) return;
+  input.value = "";
+  input.click();
+}
+
+function applyImportedProjectPayload(saved, label) {
+  if (!saved || !Array.isArray(saved.equipment)) {
+    toast("JSON 格式不符（需要 equipment 陣列）");
+    return false;
+  }
+  applyProjectPayload(saved);
+  if (state.project && state.project.name) {
+    syncTitleToProject(state.project);
+    if (!titleBelongsToProject(DATA.title, state.project.name)) {
+      DATA.title = state.project.name + "｜架線進度";
+    }
+  }
+  state.dirty = true;
+  state.weeklyPanel = "gantt";
+  state.openRemark = null;
+  state.openDates = null;
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
+  hideSyncConflict();
+  render();
+  toast((label || "已匯入") + "（" + DATA.equipment.length + " 台），請按「儲存本專案」寫入雲端");
+  return true;
+}
+
+async function handleImportJsonFile(file) {
+  if (!file) return;
+  try {
+    toast("正在讀取 JSON…");
+    const text = await file.text();
+    const saved = JSON.parse(text);
+    applyImportedProjectPayload(saved, "已匯入 " + (file.name || "JSON"));
+  } catch (e) {
+    console.error(e);
+    toast("匯入失敗：" + (e.message || e));
+  }
+}
+
+async function importMepSeedJson() {
+  if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) {
+    toast("請先登入再匯入");
+    return;
+  }
+  if (isProjectsOverview()) {
+    toast("請先點左側「R01水電工程」再匯入");
+    return;
+  }
+  const pname = (state.project && state.project.name) || "";
+  if (pname && pname.indexOf("水電") < 0) {
+    if (!confirm("目前專案是「" + pname + "」。確定要用「水電工程進度表」覆寫此專案？")) return;
+  } else if (!confirm("將以晶睿TY2 R02 電力／CDA／排氣進度表覆寫「" + (pname || "目前專案") + "」，確定？")) {
+    return;
+  }
+  try {
+    toast("載入水電工程進度表…");
+    const url = "seeds/" + encodeURIComponent("R01水電工程_line_data.json") + "?v=" + PAGE_BUILD;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("找不到種子檔 HTTP " + res.status);
+    const saved = await res.json();
+    applyImportedProjectPayload(saved, "已匯入水電工程進度表");
+  } catch (e) {
+    console.error(e);
+    toast("載入失敗：" + (e.message || e) + "（也可改用「匯入專案 JSON」選本機檔）");
+  }
+}
+
 function triggerImportXlsx() {
   if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) {
     toast("請先登入再匯入");
@@ -3895,6 +3978,7 @@ async function handleImportXlsxFile(file) {
       segOrder: DATA.segOrder || [],
       prevEquipment: DATA.equipment || []
     });
+
     if (!parsed || !Array.isArray(parsed.equipment) || !parsed.equipment.length) {
       throw new Error("沒有讀到設備資料");
     }
@@ -4374,6 +4458,18 @@ document.body.addEventListener("click", ev => {
     triggerImportXlsx();
     return;
   }
+  if (ev.target.closest("[data-import-json]")) {
+    toggleImportMenu(false);
+    toggleExportMenu(false);
+    triggerImportJson();
+    return;
+  }
+  if (ev.target.closest("[data-import-mep-seed]")) {
+    toggleImportMenu(false);
+    toggleExportMenu(false);
+    importMepSeedJson();
+    return;
+  }
   if (ev.target.closest("[data-import-history]")) {
     toggleImportMenu(false);
     toggleExportMenu(false);
@@ -4812,6 +4908,12 @@ document.getElementById("importXlsxInput")?.addEventListener("change", async (ev
   const file = ev.target.files && ev.target.files[0];
   ev.target.value = "";
   if (file) await handleImportXlsxFile(file);
+});
+
+document.getElementById("importJsonInput")?.addEventListener("change", async (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = "";
+  if (file) await handleImportJsonFile(file);
 });
 
 document.body.addEventListener("change", async (ev) => {
