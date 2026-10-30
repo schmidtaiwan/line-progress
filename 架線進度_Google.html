@@ -278,6 +278,12 @@
     gap: 8px; margin-bottom: 10px;
   }
   .gantt-wrap .gantt-head h2 { margin: 0; font-size: 17pt; }
+  .gantt-label[data-gantt-eq],
+  .gantt-track[data-gantt-eq],
+  .gantt-meta[data-gantt-eq] { cursor: pointer; }
+  .gantt-label[data-gantt-eq]:hover { background: #e7f0f7; }
+  .weekly-eq-body { padding: 2px 0 8px; }
+  .weekly-eq-panel .detail.card { border: 0; box-shadow: none; padding: 0; background: transparent; }
   .gantt-wrap .gantt-legend {
     display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 13pt; color: var(--muted);
   }
@@ -1297,9 +1303,9 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="google_config.js"></script>
 <script src="line_google_sync.js"></script>
-<script src="xlsx-js-style.min.js?v=34"></script>
-<script src="exceljs.min.js?v=34"></script>
-<script src="export_line_xlsx.js?v=34"></script>
+<script src="xlsx-js-style.min.js?v=35"></script>
+<script src="exceljs.min.js?v=35"></script>
+<script src="export_line_xlsx.js?v=35"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 const STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1307,7 +1313,7 @@ const URG_OPTS = ["高", "中", "低"];
 const STATUS_OPTS = ["未開始", "進行中", "延誤中", "已完成"];
 const REQUIRE_CLOUD_LOGIN = true;
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, weeklyPanel: "gantt" };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1318,8 +1324,8 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 34;
-const PAGE_DATE = "2026-10-29";
+const PAGE_BUILD = 35;
+const PAGE_DATE = "2026-10-30";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
   try {
@@ -1981,6 +1987,7 @@ function renderLineGanttHtml() {
     const railTone = gi % 2 === 0 ? "" : " tone-b";
     const rail = `<div class="gantt-seg-rail${railTone}" style="grid-row: span ${grp.eqs.length}" title="${escapeAttr(grp.seg)}">${escapeHtml(grp.seg || "—")}</div>`;
     const rows = grp.eqs.map((eq, ri) => {
+      const ei = DATA.equipment.indexOf(eq);
       const items = activeItemsOf(eq);
       const ratio = ratioOf(items);
       const stName = statusSelectValue(items, ratio);
@@ -2001,12 +2008,13 @@ function renderLineGanttHtml() {
       const title = (eq.seg || "") + " " + (eq.idx || "") + " " + (eq.name || "");
       const nameTxt = ((eq.idx != null && eq.idx !== "" ? eq.idx + " " : "") + (eq.name || "")).trim() || "—";
       const onMarks = enabledStageIndexes(eq).map(i => (stages[i] && (stages[i].mark || stages[i].name)) || "").filter(Boolean).join("、");
-      return `<div class="gantt-label ${toneCls}" title="${escapeAttr(title + (onMarks ? "｜階段：" + onMarks : ""))}">${escapeHtml(nameTxt)}</div>
-        <div class="gantt-meta ${toneCls}"><span class="pct ${pctClass(ratio)}">${pctText(ratio)}</span></div>
-        <div class="gantt-meta ${toneCls}"><span class="s-${stName}">${escapeHtml(stName)}</span></div>
-        <div class="gantt-meta ${toneCls} ${delays ? "delay-hot" : ""}">${delays}</div>
-        <div class="gantt-meta owner ${toneCls}" title="${escapeAttr(eq.owner || "-")}">${escapeHtml(eq.owner || "-")}</div>
-        <div class="gantt-track ${toneCls}">${bandHtml}${todayHtml}${bars}</div>`;
+      const tip = escapeAttr(title + (onMarks ? "｜階段：" + onMarks : "") + "｜雙擊開啟清單");
+      return `<div class="gantt-label ${toneCls}" data-gantt-eq="${ei}" title="${tip}">${escapeHtml(nameTxt)}</div>
+        <div class="gantt-meta ${toneCls}" data-gantt-eq="${ei}"><span class="pct ${pctClass(ratio)}">${pctText(ratio)}</span></div>
+        <div class="gantt-meta ${toneCls}" data-gantt-eq="${ei}"><span class="s-${stName}">${escapeHtml(stName)}</span></div>
+        <div class="gantt-meta ${toneCls} ${delays ? "delay-hot" : ""}" data-gantt-eq="${ei}">${delays}</div>
+        <div class="gantt-meta owner ${toneCls}" data-gantt-eq="${ei}" title="${escapeAttr(eq.owner || "-")}">${escapeHtml(eq.owner || "-")}</div>
+        <div class="gantt-track ${toneCls}" data-gantt-eq="${ei}" title="${tip}">${bandHtml}${todayHtml}${bars}</div>`;
     }).join("");
     return rail + rows;
   }).join("");
@@ -2121,10 +2129,11 @@ function renderWeekly() {
       </article>`
     };
   });
+  const mainPanel = state.weeklyPanel === "eq" ? buildWeeklyEqPanelHtml() : renderLineGanttHtml();
   document.getElementById("weekly").innerHTML = `
     <div class="cards">${cards}</div>
     ${cloudBarHtml()}
-    ${renderLineGanttHtml()}
+    ${mainPanel}
     ${chipsToolbar("")}
     <h2 class="section-title">急迫性「高」｜各製程段待處理第一項</h2>
     <div class="m-eq-cards">${tops.map(t => t.card).join("")}</div>
@@ -2135,7 +2144,52 @@ function renderWeekly() {
       </tr></thead>
       <tbody>${tops.map(t => t.row).join("")}</tbody>
     </table></div>
-    <p class="note">設備增刪／改名／改製程段／Owner 等請到「設定」頁維護。完成率請在「工作項目清單」細項更新。${escapeHtml(DATA.note || "")}</p>`;
+    <p class="note">甘特圖設備列可雙擊開啟該設備清單（同頁紅框內切換，不彈窗）。設備主檔請到「設定」維護。${escapeHtml(DATA.note || "")}</p>`;
+}
+
+/** 周報紅框：甘特雙擊後顯示的設備工作項目（同頁，非彈窗） */
+function buildWeeklyEqPanelHtml() {
+  const eq = DATA.equipment[state.eq];
+  if (!eq) {
+    state.weeklyPanel = "gantt";
+    return renderLineGanttHtml();
+  }
+  ensureActiveStageForEq(eq);
+  const title = ((eq.idx != null && eq.idx !== "" ? eq.idx + " " : "") + (eq.name || "設備")).trim();
+  return `<section class="gantt-wrap weekly-eq-panel">
+    <div class="gantt-head">
+      <h2>${escapeHtml(title)}｜工作項目</h2>
+      <button type="button" class="btn-cloud" data-show-gantt title="返回甘特圖">📊 顯示甘特圖</button>
+    </div>
+    <div class="weekly-eq-body">${buildItemsDetailHtml(eq)}</div>
+    <p class="note">此處編輯使用本機已載入資料，不會再開登入窗。按「顯示甘特圖」返回整線甘特。</p>
+  </section>`;
+}
+
+function openWeeklyEqFromGantt(ei) {
+  if (!Number.isFinite(ei) || !DATA.equipment[ei]) return;
+  state.eq = ei;
+  state.weeklyPanel = "eq";
+  state.openRemark = null;
+  state.openDates = null;
+  ensureActiveStageForEq(DATA.equipment[ei]);
+  if (state.tab !== "weekly") state.tab = "weekly";
+  render();
+}
+
+function refreshEqDetailPanel(scrollSave) {
+  if (state.tab === "items" && document.querySelector("#items .detail-host, #items .detail")) {
+    refreshItemsDetailOnly(scrollSave);
+    return true;
+  }
+  if (state.tab === "weekly" && state.weeklyPanel === "eq") {
+    const panel = document.querySelector("#weekly .weekly-eq-panel");
+    if (panel) {
+      panel.outerHTML = buildWeeklyEqPanelHtml();
+      return true;
+    }
+  }
+  return false;
 }
 
 /** 設備＋適用階段整合表（設定頁主表單） */
@@ -3758,6 +3812,14 @@ document.body.addEventListener("click", ev => {
     render();
     return;
   }
+  if (ev.target.closest("[data-show-gantt]")) {
+    state.weeklyPanel = "gantt";
+    state.openRemark = null;
+    state.openDates = null;
+    if (state.tab !== "weekly") state.tab = "weekly";
+    render();
+    return;
+  }
   const mapEq = ev.target.closest("[data-map-eq]");
   if (mapEq) {
     state.eq = Number(mapEq.dataset.mapEq);
@@ -3774,9 +3836,7 @@ document.body.addEventListener("click", ev => {
     state.stage = Number(stage.dataset.stage);
     state.openRemark = null;
     state.openDates = null;
-    if (state.tab === "items" && document.querySelector("#items .detail-host, #items .detail")) {
-      refreshItemsDetailOnly(scrollSave);
-    } else {
+    if (!refreshEqDetailPanel(scrollSave)) {
       state._eqListScroll = scrollSave;
       render();
       pinEqListScroll(scrollSave);
@@ -3795,9 +3855,7 @@ document.body.addEventListener("click", ev => {
     const scrollSave = captureEqListScroll();
     state.openRemark = state.openRemark === idx ? null : idx;
     state.openDates = null;
-    if (state.tab === "items" && document.querySelector("#items .detail-host, #items .detail")) {
-      refreshItemsDetailOnly(scrollSave);
-    } else {
+    if (!refreshEqDetailPanel(scrollSave)) {
       state._eqListScroll = scrollSave;
       render();
       pinEqListScroll(scrollSave);
@@ -3812,9 +3870,7 @@ document.body.addEventListener("click", ev => {
     const idx = Number(toggleDates.dataset.toggleDates);
     const scrollSave = captureEqListScroll();
     state.openDates = state.openDates === idx ? null : idx;
-    if (state.tab === "items" && document.querySelector("#items .detail-host, #items .detail")) {
-      refreshItemsDetailOnly(scrollSave);
-    } else {
+    if (!refreshEqDetailPanel(scrollSave)) {
       state._eqListScroll = scrollSave;
       render();
       pinEqListScroll(scrollSave);
@@ -3822,11 +3878,11 @@ document.body.addEventListener("click", ev => {
     return;
   }
   if (!ev.target.closest(".date-drop") && !ev.target.closest("[data-toggle-dates]")) {
-    if (state.openDates !== null && state.tab === "items") {
+    if (state.openDates !== null && (state.tab === "items" || (state.tab === "weekly" && state.weeklyPanel === "eq"))) {
       state.openDates = null;
       const drop = document.querySelector(".date-drop.open");
       if (drop) {
-        refreshItemsDetailOnly();
+        if (!refreshEqDetailPanel()) render();
         return;
       }
     }
@@ -3944,6 +4000,15 @@ document.body.addEventListener("click", ev => {
   if (ev.target.closest("[data-export-xlsx]")) {
     exportChanges();
   }
+});
+
+document.body.addEventListener("dblclick", ev => {
+  const hit = ev.target.closest("[data-gantt-eq]");
+  if (!hit) return;
+  const ei = Number(hit.dataset.ganttEq);
+  if (!Number.isFinite(ei) || !DATA.equipment[ei]) return;
+  ev.preventDefault();
+  openWeeklyEqFromGantt(ei);
 });
 
 document.body.addEventListener("contextmenu", ev => {
