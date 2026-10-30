@@ -262,15 +262,18 @@
       });
   }
 
-  function createProject(name) {
+  function createProject(name, opts) {
+    opts = opts || {};
     const label = String(name || "").trim();
     if (!label) return Promise.reject(new Error("請輸入專案名稱"));
+    const arch = opts.arch === "hierarchy" ? "hierarchy" : "equipment";
     const folderName = sanitizeProjectFolderName(label);
     const folderPath = projectsRootParts().concat([folderName]).join("/");
     const proj = {
       id: "p-" + Date.now().toString(36),
       name: label,
       folderPath: folderPath,
+      arch: arch,
       legacyFallback: false,
       createdAt: new Date().toISOString()
     };
