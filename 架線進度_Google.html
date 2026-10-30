@@ -1253,6 +1253,35 @@
     border-color: #16324a;
     font-weight: 700;
   }
+  .project-rail .proj-btn.overview-btn {
+    border-color: #b45309;
+    background: #fff7ed;
+    color: #9a3412;
+    font-weight: 700;
+  }
+  .project-rail .proj-btn.overview-btn.on {
+    background: #c2410c;
+    border-color: #c2410c;
+    color: #fff;
+  }
+  .proj-overview-block {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 14px 10px;
+    margin: 14px 0 18px;
+    background: #fff;
+  }
+  .proj-overview-block h3 {
+    margin: 0 0 10px;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .proj-overview-block .cards { margin-bottom: 8px; }
+  .proj-overview-merged { margin-top: 8px; }
   .project-rail .btn-add-proj,
   .project-rail .btn-save-all-proj {
     width: 100%;
@@ -1389,8 +1418,10 @@ const URG_OPTS = ["高", "中", "低"];
 const STATUS_OPTS = ["未開始", "進行中", "延誤中", "已完成"];
 const REQUIRE_CLOUD_LOGIN = true;
 const PROJECTS_STORE = "vivo_line_projects_meta_v1";
+const PROJECTS_OVERVIEW_ID = "__projects_overview__";
+const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1401,7 +1432,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 39;
+const PAGE_BUILD = 40;
 const PAGE_DATE = "2026-10-30";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1531,13 +1562,19 @@ function blankProjectPayload(name) {
   };
 }
 
+function isProjectsOverview() {
+  return !!(state.project && state.project.id === PROJECTS_OVERVIEW_ID);
+}
+
 function renderProjectRail() {
   const host = document.getElementById("projectList");
   if (!host) return;
   const list = state.projects || [];
   const curId = state.project && state.project.id;
+  const overviewOn = curId === PROJECTS_OVERVIEW_ID ? "on" : "";
+  let html = `<button type="button" class="proj-btn overview-btn ${overviewOn}" data-projects-overview title="各專案周報與合併總表">專案總覽</button>`;
   if (state.projectsLoading) {
-    host.innerHTML = `<p class="rail-hint">載入專案中…</p>`;
+    host.innerHTML = html + `<p class="rail-hint">載入專案中…</p>`;
     return;
   }
   if (!list.length) {
@@ -1545,16 +1582,17 @@ function renderProjectRail() {
       const err = state.projectsError
         ? `<p class="rail-hint" style="color:#b91c1c">${escapeHtml(state.projectsError)}</p>`
         : `<p class="rail-hint">尚無專案清單</p>`;
-      host.innerHTML = err + `<button type="button" class="proj-btn" data-retry-projects>重新載入專案</button>`;
+      host.innerHTML = html + err + `<button type="button" class="proj-btn" data-retry-projects>重新載入專案</button>`;
       return;
     }
-    host.innerHTML = `<p class="rail-hint">登入後載入專案</p>`;
+    host.innerHTML = html + `<p class="rail-hint">登入後載入專案</p>`;
     return;
   }
-  host.innerHTML = list.map(p => {
+  html += list.map(p => {
     const on = p.id === curId ? "on" : "";
     return `<button type="button" class="proj-btn ${on}" data-project-id="${escapeAttr(p.id)}" title="${escapeAttr(p.folderPath || p.name)}">${escapeHtml(p.name)}</button>`;
   }).join("");
+  host.innerHTML = html;
 }
 
 async function ensureProjectsLoaded() {
@@ -1569,6 +1607,11 @@ async function ensureProjectsLoaded() {
     state.projects = list || [];
     state.projectsError = "";
     const remembered = readRememberedProjectId();
+    if (remembered === PROJECTS_OVERVIEW_ID) {
+      state.projectsLoading = false;
+      await activateProjectsOverview({ fromCloud: true, skipConfirm: true });
+      return;
+    }
     let cur = state.projects.find(p => p.id === remembered) || state.projects[0];
     if (!cur) {
       renderProjectRail();
@@ -2083,6 +2126,31 @@ function stageDelayCounts() {
 }
 
 function renderKpis() {
+  if (isProjectsOverview()) {
+    const snaps = state.overviewSnapshots || [];
+    let eqN = 0, high = 0, delay = 0, prepItemsAll = [];
+    snaps.forEach(s => {
+      eqN += (s.equipment || []).length;
+      (s.equipment || []).forEach(eq => {
+        prepItemsAll = prepItemsAll.concat(snapPrepItems(eq));
+        (eq.stages || []).forEach(st => {
+          (st.items || []).forEach(it => { if (it.status === "延誤中") delay++; });
+        });
+      });
+      high += highOpen((s.equipment || []).flatMap(snapPrepItems));
+    });
+    const ratio = ratioOf(prepItemsAll);
+    const cards = [
+      { label: "專案數", value: String(snaps.length), sub: snaps.map(s => s.name).join("、") || "—" },
+      { label: "設備數（全部）", value: String(eqN), sub: "各專案合計" },
+      { label: "架線前準備完成率", value: pctText(ratio), sub: "全部專案細項平均" },
+      { label: "高急迫／延誤", value: high + " / " + delay, sub: "高急迫未完成 / 延誤中細項" }
+    ];
+    document.getElementById("kpis").innerHTML = cards.map(c =>
+      `<article class="kpi"><div class="label">${c.label}</div><div class="value">${c.value}</div><div class="sub">${escapeHtml(c.sub)}</div></article>`
+    ).join("");
+    return;
+  }
   const allPrep = DATA.equipment.flatMap(prepItems);
   const ratio = ratioOf(allPrep);
   const high = highOpen(allPrep);
@@ -2388,7 +2456,210 @@ function nextEqIdx() {
   return String(Math.floor(max) + 1);
 }
 
+function snapshotFromPayload(proj, payload) {
+  const equipment = Array.isArray(payload && payload.equipment) ? payload.equipment : [];
+  const stages = (payload && Array.isArray(payload.stages) && payload.stages.length)
+    ? payload.stages
+    : clone(BASE.stages);
+  const segOrder = (payload && Array.isArray(payload.segOrder) && payload.segOrder.length)
+    ? payload.segOrder
+    : clone(BASE.segOrder);
+  const milestones = Array.isArray(payload && payload.milestones) ? payload.milestones : [];
+  return {
+    project: proj,
+    name: (proj && proj.name) || "未命名",
+    title: (payload && payload.title) || ((proj && proj.name) + "｜架線進度"),
+    subtitle: (payload && payload.subtitle) || "",
+    equipment: equipment,
+    stages: stages,
+    segOrder: segOrder,
+    milestones: milestones,
+    source: (payload && payload.source) || "",
+    savedAt: (payload && payload.savedAt) || ""
+  };
+}
+
+function readLocalProjectSnapshot(proj) {
+  if (!proj) return snapshotFromPayload(proj, blankProjectPayload((proj && proj.name) || "專案"));
+  if (state.project && state.project.id === proj.id && !isProjectsOverview()) {
+    return snapshotFromPayload(proj, cloudPayload());
+  }
+  try {
+    const raw = localStorage.getItem(storeKeyForProject(proj));
+    if (raw) {
+      const saved = JSON.parse(raw);
+      if (saved && Array.isArray(saved.equipment)) return snapshotFromPayload(proj, saved);
+    }
+  } catch (e) {}
+  return snapshotFromPayload(proj, blankProjectPayload(proj.name));
+}
+
+async function loadOverviewSnapshots(opts) {
+  opts = opts || {};
+  const list = state.projects || [];
+  const snaps = [];
+  const prevActive = (window.LineOneDrive && typeof LineOneDrive.getActiveProject === "function")
+    ? LineOneDrive.getActiveProject()
+    : null;
+  for (let i = 0; i < list.length; i++) {
+    const proj = list[i];
+    let snap = readLocalProjectSnapshot(proj);
+    if (opts.fromCloud && window.LineOneDrive && isCloudLoggedIn()) {
+      try {
+        LineOneDrive.setActiveProject(proj);
+        const cloud = await LineOneDrive.downloadJson();
+        if (cloud && Array.isArray(cloud.equipment)) {
+          snap = snapshotFromPayload(proj, cloud);
+          try { localStorage.setItem(storeKeyForProject(proj), JSON.stringify(cloud)); } catch (e) {}
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    snaps.push(snap);
+  }
+  if (prevActive && window.LineOneDrive && typeof LineOneDrive.setActiveProject === "function" && prevActive.id) {
+    try { LineOneDrive.setActiveProject(prevActive); } catch (e) {}
+  }
+  return snaps;
+}
+
+async function activateProjectsOverview(opts) {
+  opts = opts || {};
+  if (!opts.skipConfirm && state.dirty && !isProjectsOverview()) {
+    if (!confirm("目前專案有未儲存變更。切到總覽後仍留在本機暫存，請記得回來按「儲存」或「全部儲存」。確定切換？")) return;
+  }
+  if (state.project && !isProjectsOverview()) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
+  }
+  state.project = PROJECTS_OVERVIEW;
+  rememberActiveProjectId(PROJECTS_OVERVIEW_ID);
+  state.tab = "weekly";
+  state.weeklyPanel = "gantt";
+  state.openRemark = null;
+  state.openDates = null;
+  DATA.title = "專案總覽｜架線進度";
+  DATA.subtitle = "各專案周報摘要＋合併總表（點左側專案可進入單案編輯）";
+  state.overviewLoading = true;
+  render();
+  try {
+    toast("載入專案總覽…");
+    state.overviewSnapshots = await loadOverviewSnapshots({ fromCloud: !!opts.fromCloud });
+    state.overviewLoading = false;
+    render();
+    toast("已載入專案總覽（" + state.overviewSnapshots.length + " 案）");
+  } catch (e) {
+    console.warn(e);
+    state.overviewLoading = false;
+    toast("專案總覽載入失敗：" + ((e && e.message) || e));
+    render();
+  }
+}
+
+function snapPrepItems(eq) {
+  try {
+    if (!eq || !eq.stages || !eq.stages[0] || !Array.isArray(eq.stages[0].items)) return [];
+    return eq.stages[0].items;
+  } catch (e) {
+    return [];
+  }
+}
+
+function buildSnapSegCardsHtml(snap) {
+  const segOrder = snap.segOrder || [];
+  const cls = { "板階段": "seg-board", "組裝段": "seg-assy", "測試段": "seg-test" };
+  return segOrder.map(seg => {
+    const eqs = (snap.equipment || []).filter(eq => eq.seg === seg);
+    const items = eqs.flatMap(snapPrepItems);
+    const mile = ((snap.milestones || []).find(m => m.seg === seg) || {}).dates || [];
+    const ratio = ratioOf(items);
+    const high = highOpen(items);
+    return `<article class="card ${cls[seg] || ""}">
+      <h2>${escapeHtml(seg)}</h2>
+      <div class="meta"><span>${eqs.length} 台設備</span><span>高急迫 ${high}</span></div>
+      <div class="pct ${pctClass(ratio)}" style="font-size:24px">${pctText(ratio)}</div>
+      ${barHtml(ratio)}
+      <div class="meta" style="margin-top:8px"><span>預計完成</span><span>${mile[0] || "-"}</span></div>
+    </article>`;
+  }).join("");
+}
+
+function buildSnapEquipmentRowsHtml(snap, withProjectCol) {
+  const rows = (snap.equipment || []).map(eq => {
+    const items = snapPrepItems(eq);
+    const ratio = ratioOf(items);
+    const high = highOpen(items);
+    const projCell = withProjectCol ? `<td>${escapeHtml(snap.name)}</td>` : "";
+    return `<tr>
+      ${projCell}
+      <td>${tag(eq.seg || "")}</td>
+      <td>${escapeHtml(((eq.idx != null && eq.idx !== "") ? eq.idx + " " : "") + (eq.name || ""))}</td>
+      <td class="pct ${pctClass(ratio)}">${pctText(ratio)}</td>
+      <td>${high}</td>
+      <td>${escapeHtml(eq.owner || "")}</td>
+      <td>${escapeHtml(eq.pm || "")}</td>
+    </tr>`;
+  });
+  return rows.join("");
+}
+
+function renderProjectsOverviewWeekly() {
+  const snaps = state.overviewSnapshots || [];
+  if (state.overviewLoading) {
+    document.getElementById("weekly").innerHTML = `${cloudBarHtml()}<p class="note">正在彙整各專案進度…</p>`;
+    return;
+  }
+  if (!snaps.length) {
+    document.getElementById("weekly").innerHTML = `${cloudBarHtml()}<p class="note">尚無專案可總覽。請先新增專案，或按左側「重新載入專案」。</p>`;
+    return;
+  }
+
+  const mergedHead = `<tr><th>專案</th><th>製程段</th><th>設備</th><th>準備完成率</th><th>高急迫未完成</th><th>Owner</th><th>PM</th></tr>`;
+  const mergedBody = snaps.map(s => buildSnapEquipmentRowsHtml(s, true)).join("") ||
+    `<tr><td colspan="7">各專案尚無設備資料</td></tr>`;
+
+  const perProject = snaps.map(snap => {
+    const eqs = snap.equipment || [];
+    const allPrep = eqs.flatMap(snapPrepItems);
+    const ratio = ratioOf(allPrep);
+    const high = highOpen(allPrep);
+    const pid = (snap.project && snap.project.id) || "";
+    const tableBody = buildSnapEquipmentRowsHtml(snap, false) ||
+      `<tr><td colspan="6">尚無設備</td></tr>`;
+    return `<section class="proj-overview-block">
+      <h3>
+        <span>${escapeHtml(snap.name)}｜架線周報</span>
+        <span style="font-size:13px;font-weight:600;color:var(--muted)">設備 ${eqs.length}　準備 ${pctText(ratio)}　高急迫 ${high}</span>
+        <button type="button" class="btn-cloud" data-open-project-id="${escapeAttr(pid)}">進入專案</button>
+      </h3>
+      <div class="cards">${buildSnapSegCardsHtml(snap)}</div>
+      <div class="scroll desktop-table"><table>
+        <thead><tr><th>製程段</th><th>設備</th><th>準備完成率</th><th>高急迫未完成</th><th>Owner</th><th>PM</th></tr></thead>
+        <tbody>${tableBody}</tbody>
+      </table></div>
+    </section>`;
+  }).join("");
+
+  document.getElementById("weekly").innerHTML = `
+    ${cloudBarHtml()}
+    <section class="proj-overview-block proj-overview-merged">
+      <h3><span>專案總覽周報｜全部專案合併</span><span style="font-size:13px;font-weight:600;color:var(--muted)">${snaps.length} 個專案</span></h3>
+      <p class="note" style="margin-top:0">將所有專案設備進度放在同一張表，方便一次對照。</p>
+      <div class="scroll desktop-table"><table>
+        <thead>${mergedHead}</thead>
+        <tbody>${mergedBody}</tbody>
+      </table></div>
+    </section>
+    <h2 class="section-title">各專案架線周報</h2>
+    ${perProject}
+    <p class="note">總覽為唯讀彙整。要改進度請點「進入專案」或左側專案名稱。可用左側「全部儲存」一次寫回雲端。</p>`;
+}
+
 function renderWeekly() {
+  if (isProjectsOverview()) {
+    renderProjectsOverviewWeekly();
+    return;
+  }
   const groups = DATA.segOrder.map(seg => {
     const eqs = DATA.equipment.filter(eq => eq.seg === seg);
     const items = eqs.flatMap(prepItems);
@@ -2974,12 +3245,24 @@ function render() {
     return;
   }
   document.body.classList.remove("locked");
+  if (isProjectsOverview()) {
+    DATA.title = "專案總覽｜架線進度";
+    DATA.subtitle = "各專案周報摘要＋合併總表（點左側專案可進入單案編輯）";
+    if (state.tab !== "weekly") state.tab = "weekly";
+  }
   document.getElementById("title").textContent = DATA.title;
   document.getElementById("subtitle").textContent = DATA.subtitle;
   updateFoot();
   renderProjectRail();
   document.querySelectorAll("nav.tabs button").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.tab === state.tab);
+    if (isProjectsOverview() && btn.dataset.tab !== "weekly") {
+      btn.style.opacity = "0.45";
+      btn.title = "總覽模式僅顯示周報，請先選左側專案";
+    } else {
+      btn.style.opacity = "";
+      if (btn.dataset.tab !== "settings") btn.title = "";
+    }
   });
   ["weekly", "overview", "items", "map", "settings"].forEach(id => {
     const el = document.getElementById(id);
@@ -3962,6 +4245,10 @@ async function cloudPush() {
       await cloudLogin();
       return;
     }
+    if (isProjectsOverview()) {
+      toast("總覽模式請用左側「全部儲存」，或先進入單一專案再儲存");
+      return;
+    }
     if (state.project && typeof LineOneDrive.setActiveProject === "function") {
       LineOneDrive.setActiveProject(state.project);
     }
@@ -4060,6 +4347,10 @@ document.body.addEventListener("click", ev => {
       toast("請先登入再進入設定");
       return;
     }
+    if (isProjectsOverview()) {
+      toast("請先點左側單一專案再進入設定");
+      return;
+    }
     state.tab = "settings";
     render();
     return;
@@ -4133,6 +4424,10 @@ document.body.addEventListener("click", ev => {
   if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) return;
   const tab = ev.target.closest("nav.tabs button");
   if (tab) {
+    if (isProjectsOverview() && tab.dataset.tab !== "weekly") {
+      toast("專案總覽僅顯示周報，請先點左側單一專案");
+      return;
+    }
     state.tab = tab.dataset.tab;
     if (state.tab !== "items") {
       // 離開細部時清掉 hash，避免下次重整又跳回
@@ -4182,6 +4477,17 @@ document.body.addEventListener("click", ev => {
   }
   if (ev.target.closest("[data-add-project]")) {
     addNewProject();
+    return;
+  }
+  if (ev.target.closest("[data-projects-overview]")) {
+    activateProjectsOverview({ fromCloud: true });
+    return;
+  }
+  const openProj = ev.target.closest("[data-open-project-id]");
+  if (openProj) {
+    const id = openProj.dataset.openProjectId;
+    const proj = (state.projects || []).find(p => p.id === id);
+    if (proj) activateProject(proj, { fromCloud: true });
     return;
   }
   if (ev.target.closest("[data-save-all-projects]")) {
