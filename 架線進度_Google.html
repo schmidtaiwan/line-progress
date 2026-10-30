@@ -1253,7 +1253,8 @@
     border-color: #16324a;
     font-weight: 700;
   }
-  .project-rail .btn-add-proj {
+  .project-rail .btn-add-proj,
+  .project-rail .btn-save-all-proj {
     width: 100%;
     border: 1px dashed #7a8a99;
     background: transparent;
@@ -1265,6 +1266,15 @@
     color: #16324a;
   }
   .project-rail .btn-add-proj:hover { background: #e7f0f7; }
+  .project-rail .btn-save-all-proj {
+    border-style: solid;
+    border-color: #1d4f91;
+    background: #1d4f91;
+    color: #fff;
+    margin-top: 4px;
+  }
+  .project-rail .btn-save-all-proj:hover { background: #163a6b; }
+  .project-rail .btn-save-all-proj:disabled { opacity: 0.55; cursor: wait; }
   .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   body.locked .project-rail { display: none; }
 </style>
@@ -1276,6 +1286,7 @@
   <p class="rail-hint">點選切換；雲端依專案名稱建資料夾</p>
   <div class="proj-list" id="projectList"></div>
   <button type="button" class="btn-add-proj" data-add-project title="新增專案">＋ 新增專案</button>
+  <button type="button" class="btn-save-all-proj" data-save-all-projects title="將所有專案的本機進度寫入各自雲端資料夾">全部儲存</button>
 </aside>
 <div class="app-main">
 <header class="top">
@@ -1390,7 +1401,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 37;
+const PAGE_BUILD = 39;
 const PAGE_DATE = "2026-10-30";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 function isMobileView() {
@@ -1457,9 +1468,13 @@ function cloudPayload() {
   };
 }
 
-function setStoreKeyForProject(proj) {
+function storeKeyForProject(proj) {
   const pid = (proj && (proj.id || proj.name)) || "default";
-  STORE_KEY = "vivo_line_dash_" + String(pid).replace(/[^\w\-]+/g, "_") + "_" + (BASE.source || "default");
+  return "vivo_line_dash_" + String(pid).replace(/[^\w\-]+/g, "_") + "_" + (BASE.source || "default");
+}
+
+function setStoreKeyForProject(proj) {
+  STORE_KEY = storeKeyForProject(proj);
 }
 
 function rememberActiveProjectId(id) {
@@ -1570,6 +1585,22 @@ async function ensureProjectsLoaded() {
   }
 }
 
+function titleBelongsToProject(title, projName) {
+  const t = String(title || "");
+  const n = String(projName || "").trim();
+  if (!n) return true;
+  if (t.indexOf(n) >= 0) return true;
+  // VIVO R01 舊標題相容（TW1_VIVO_R01…）
+  if (/^vivo\s*r0?1$/i.test(n) && /VIVO[_\s-]?R0?1|TW1_VIVO_R01/i.test(t)) return true;
+  return false;
+}
+
+function syncTitleToProject(proj) {
+  if (!proj || !proj.name) return;
+  if (titleBelongsToProject(DATA.title, proj.name)) return;
+  DATA.title = proj.name + "｜架線進度";
+}
+
 async function activateProject(proj, opts) {
   opts = opts || {};
   if (!proj) return;
@@ -1586,26 +1617,34 @@ async function activateProject(proj, opts) {
   if (window.LineOneDrive && typeof LineOneDrive.setActiveProject === "function") {
     LineOneDrive.setActiveProject(proj);
   }
-  // 先套本機暫存
+  // 先套本機暫存；沒有則先清空，避免沿用上一案畫面／標題
+  let loadedLocal = false;
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
       const saved = JSON.parse(raw);
-      if (saved && Array.isArray(saved.equipment)) applyProjectPayload(saved);
-    } else if (opts.resetToBlank) {
-      applyProjectPayload(blankProjectPayload(proj.name));
+      if (saved && Array.isArray(saved.equipment)) {
+        applyProjectPayload(saved);
+        loadedLocal = true;
+      }
     }
   } catch (e) {}
+  if (!loadedLocal) {
+    applyProjectPayload(blankProjectPayload(proj.name));
+  }
+  syncTitleToProject(proj);
   if (opts.fromCloud && window.LineOneDrive && isCloudLoggedIn()) {
     try {
       toast("載入專案「" + proj.name + "」…");
       const cloud = await LineOneDrive.downloadJson();
       if (cloud && Array.isArray(cloud.equipment)) {
         applyProjectPayload(cloud);
+        syncTitleToProject(proj);
         state.dirty = false;
         saveLocal("已載入專案「" + proj.name + "」", { clearDirty: true });
-      } else if (opts.resetToBlank || !(DATA.equipment && DATA.equipment.length)) {
+      } else if (opts.resetToBlank || !loadedLocal) {
         applyProjectPayload(blankProjectPayload(proj.name));
+        syncTitleToProject(proj);
         await LineOneDrive.uploadJson(cloudPayload());
         state.dirty = false;
         saveLocal("已建立專案資料夾「" + proj.name + "」", { clearDirty: true });
@@ -1617,9 +1656,7 @@ async function activateProject(proj, opts) {
       toast("載入專案失敗：" + (e.message || e));
     }
   }
-  if (!DATA.title || DATA.title === BASE.title) {
-    DATA.title = proj.name + "｜架線進度";
-  }
+  syncTitleToProject(proj);
   render();
 }
 
@@ -1860,7 +1897,7 @@ function viewerBadgeHtml() {
 function cloudBarHtml() {
   const logged = isCloudLoggedIn();
   const saveCls = "btn-cloud" + (state.dirty ? " dirty" : "");
-  const saveLabel = state.dirty ? "儲存＊" : "儲存";
+  const saveLabel = state.dirty ? "儲存本專案＊" : "儲存本專案";
   // 未登入：只顯示狀態＋登入按鈕
   if (!logged) {
     return `<div class="cloud-bar" id="cloudBar">
@@ -1873,7 +1910,7 @@ function cloudBarHtml() {
       ${viewerBadgeHtml()}
       <button type="button" class="btn-cloud" data-cloud-login>🔄 重新登入</button>
       <button type="button" class="btn-cloud ghost" data-cloud-pull>☁ 從雲端載入</button>
-      <button type="button" class="${saveCls}" data-cloud-push title="將本機變更寫入 Google 雲端硬碟">💾 ${saveLabel}</button>
+      <button type="button" class="${saveCls}" data-cloud-push title="只儲存目前專案到雲端">💾 ${saveLabel}</button>
       <button type="button" class="btn-cloud ghost" data-cloud-logout>🚪 登出</button>
     </div>`;
 }
@@ -3925,18 +3962,94 @@ async function cloudPush() {
       await cloudLogin();
       return;
     }
-    toast("正在儲存到雲端…");
+    if (state.project && typeof LineOneDrive.setActiveProject === "function") {
+      LineOneDrive.setActiveProject(state.project);
+    }
+    const name = (state.project && state.project.name) || "目前專案";
+    toast("正在儲存「" + name + "」…");
     const payload = cloudPayload();
     await LineOneDrive.uploadJson(payload);
     localStorage.setItem(STORE_KEY, JSON.stringify(payload));
     state.dirty = false;
     hideSyncConflict();
     updateCloudBar();
-    toast("已儲存到雲端（" + DATA.equipment.length + " 台）");
+    toast("已儲存「" + name + "」（" + DATA.equipment.length + " 台）");
     render();
   } catch (e) {
     console.error(e);
     toast("儲存失敗：" + (e.message || e));
+  }
+}
+
+async function cloudPushAllProjects() {
+  try {
+    if (!isCloudLoggedIn()) {
+      await cloudLogin();
+      return;
+    }
+    const list = state.projects || [];
+    if (!list.length) {
+      await cloudPush();
+      return;
+    }
+    // 先把目前畫面寫入本機，再逐案上傳
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
+    const prev = state.project;
+    const btn = document.querySelector("[data-save-all-projects]");
+    if (btn) btn.disabled = true;
+    let ok = 0;
+    let skipped = 0;
+    const fails = [];
+    toast("全部儲存中（" + list.length + " 個專案）…");
+    for (let i = 0; i < list.length; i++) {
+      const proj = list[i];
+      try {
+        if (typeof LineOneDrive.setActiveProject === "function") {
+          LineOneDrive.setActiveProject(proj);
+        }
+        let payload = null;
+        if (prev && proj.id === prev.id) {
+          payload = cloudPayload();
+        } else {
+          const raw = localStorage.getItem(storeKeyForProject(proj));
+          if (raw) {
+            try { payload = JSON.parse(raw); } catch (e) { payload = null; }
+          }
+        }
+        if (!payload || !Array.isArray(payload.equipment)) {
+          skipped++;
+          continue;
+        }
+        payload.projectId = proj.id;
+        payload.projectName = proj.name;
+        payload.savedAt = new Date().toISOString();
+        await LineOneDrive.uploadJson(payload);
+        try { localStorage.setItem(storeKeyForProject(proj), JSON.stringify(payload)); } catch (e) {}
+        ok++;
+      } catch (e) {
+        console.warn(e);
+        fails.push((proj.name || proj.id) + "：" + ((e && e.message) || e));
+      }
+    }
+    if (prev && typeof LineOneDrive.setActiveProject === "function") {
+      LineOneDrive.setActiveProject(prev);
+    }
+    if (prev) setStoreKeyForProject(prev);
+    state.dirty = false;
+    hideSyncConflict();
+    updateCloudBar();
+    if (fails.length) {
+      toast("全部儲存：成功 " + ok + "，略過 " + skipped + "，失敗 " + fails.length + "（" + fails[0] + "）");
+    } else {
+      toast("全部儲存完成：成功 " + ok + (skipped ? "，略過無本機資料 " + skipped : ""));
+    }
+    render();
+  } catch (e) {
+    console.error(e);
+    toast("全部儲存失敗：" + (e.message || e));
+  } finally {
+    const btn = document.querySelector("[data-save-all-projects]");
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -4069,6 +4182,10 @@ document.body.addEventListener("click", ev => {
   }
   if (ev.target.closest("[data-add-project]")) {
     addNewProject();
+    return;
+  }
+  if (ev.target.closest("[data-save-all-projects]")) {
+    cloudPushAllProjects();
     return;
   }
   if (ev.target.closest("[data-retry-projects]")) {
