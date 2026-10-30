@@ -24,21 +24,247 @@
   const PRESENCE_TTL_MS = 45000;
   const PRESENCE_INTERVAL_MS = 12000;
   const PRESENCE_PREFIX = "vivo_r01_view_";
+  /** 目前作用中專案（決定雲端資料夾） */
+  let activeProject = null;
 
   function fileName() {
-    return cfg.fileName || "vivo_r01_line_data.json";
+    return (cfg.fileName || "line_data.json").trim() || "line_data.json";
+  }
+
+  function splitPath(raw) {
+    return String(raw || "").replace(/^\/+|\/+$/g, "").split("/").map(function (s) {
+      return s.trim();
+    }).filter(Boolean);
+  }
+
+  function projectsRootParts() {
+    return splitPath(cfg.projectsRoot || "架線進度專案");
+  }
+
+  function sanitizeProjectFolderName(name) {
+    return String(name || "新專案")
+      .replace(/[\\/:*?"<>|]/g, "_")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80) || "新專案";
   }
 
   function folderPathParts() {
+    if (activeProject && activeProject.folderPath) {
+      return splitPath(activeProject.folderPath);
+    }
     const raw = (cfg.folderPath || cfg.folderName || "").trim();
-    if (!raw) return [];
-    return raw.replace(/^\/+|\/+$/g, "").split("/").map(function (s) { return s.trim(); }).filter(Boolean);
+    if (!raw) return projectsRootParts().concat(["VIVO R01"]);
+    return splitPath(raw);
   }
 
   function storageKey() {
     const email = (state.account && (state.account.email || state.account.username)) || "default";
     const folderKey = (cfg.folderId || folderPathParts().join("/") || "root");
     return "line_google_drive_file_id_" + email + "_" + folderKey + "_" + fileName();
+  }
+
+  function clearFolderCache() {
+    cachedFolderId = "";
+    try { saveStoredFileId(""); } catch (e) {}
+    state.fileId = "";
+  }
+
+  function getActiveProject() {
+    return activeProject;
+  }
+
+  function setActiveProject(proj) {
+    if (!proj || !proj.name) return activeProject;
+    activeProject = {
+      id: String(proj.id || proj.name),
+      name: String(proj.name),
+      folderPath: String(proj.folderPath || (projectsRootParts().concat([sanitizeProjectFolderName(proj.name)]).join("/"))),
+      legacyFallback: !!proj.legacyFallback,
+      legacyFolderPath: proj.legacyFolderPath || "",
+      legacyFileName: proj.legacyFileName || ""
+    };
+    clearFolderCache();
+    loadStoredFileId();
+    return activeProject;
+  }
+
+  function ensureProjectsRootId() {
+    const parts = projectsRootParts();
+    if (!parts.length) return Promise.resolve("root");
+    let chain = Promise.resolve("root");
+    parts.forEach(function (part) {
+      chain = chain.then(function (parentId) {
+        return findChildFolder(parentId, part).then(function (id) {
+          if (id) return id;
+          return createChildFolder(parentId, part);
+        });
+      });
+    });
+    return chain;
+  }
+
+  function defaultProjectsList() {
+    const legacyPath = (cfg.legacyFolderPath || "R01_V4架線進度").trim();
+    const folderName = sanitizeProjectFolderName("VIVO R01");
+    const newPath = projectsRootParts().concat([folderName]).join("/");
+    return [{
+      id: "vivo-r01",
+      name: "VIVO R01",
+      folderPath: newPath,
+      legacyFallback: true,
+      legacyFolderPath: legacyPath,
+      legacyFileName: (cfg.legacyFileName || "vivo_r01_line_data.json").trim(),
+      createdAt: new Date().toISOString()
+    }];
+  }
+
+  function fetchJsonInFolder(folderId, name) {
+    const safe = String(name || "").replace(/'/g, "\\'");
+    let q = "name='" + safe + "' and trashed=false";
+    if (folderId && folderId !== "root") q += " and '" + folderId + "' in parents";
+    return driveListByQuery(q).then(function (files) {
+      if (!files.length) return null;
+      return fetchJsonById(files[0].id);
+    });
+  }
+
+  function putJsonInFolder(folderId, name, payload) {
+    const body = JSON.stringify(payload);
+    const safe = String(name || "").replace(/'/g, "\\'");
+    let q = "name='" + safe + "' and trashed=false";
+    if (folderId && folderId !== "root") q += " and '" + folderId + "' in parents";
+    return driveListByQuery(q).then(function (files) {
+      if (files.length) {
+        return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + files[0].id + "?uploadType=media", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+          body: body
+        }).then(function (res) {
+          if (!res.ok) return res.text().then(function (t) { throw new Error("寫入專案清單失敗 " + res.status + " " + t); });
+          return files[0];
+        });
+      }
+      const meta = { name: name, mimeType: "application/json" };
+      if (folderId && folderId !== "root") meta.parents = [folderId];
+      return driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(meta)
+      }).then(function (res) {
+        if (!res.ok) return res.text().then(function (t) { throw new Error("建立專案清單失敗 " + res.status + " " + t); });
+        return res.json();
+      }).then(function (f) {
+        return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + f.id + "?uploadType=media", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+          body: body
+        }).then(function () { return f; });
+      });
+    });
+  }
+
+  function loadProjectsIndex() {
+    return ensureInit()
+      .then(function () {
+        if (!state.account) return login({ prompt: "consent" });
+      })
+      .then(function () {
+        return withScopeRetry(function () {
+          return ensureProjectsRootId().then(function (rootId) {
+            return fetchJsonInFolder(rootId, "projects_index.json").then(function (data) {
+              let list = (data && Array.isArray(data.projects)) ? data.projects : [];
+              if (!list.length) {
+                list = defaultProjectsList();
+                return putJsonInFolder(rootId, "projects_index.json", {
+                  savedAt: new Date().toISOString(),
+                  projects: list
+                }).then(function () { return list; });
+              }
+              return list.map(function (p) {
+                return {
+                  id: String(p.id || p.name || ""),
+                  name: String(p.name || "未命名"),
+                  folderPath: String(p.folderPath || projectsRootParts().concat([sanitizeProjectFolderName(p.name)]).join("/")),
+                  legacyFallback: !!p.legacyFallback,
+                  legacyFolderPath: p.legacyFolderPath || "",
+                  legacyFileName: p.legacyFileName || "",
+                  createdAt: p.createdAt || ""
+                };
+              });
+            });
+          });
+        });
+      });
+  }
+
+  function saveProjectsIndex(projects) {
+    const list = Array.isArray(projects) ? projects : [];
+    return ensureInit()
+      .then(function () {
+        if (!state.account) return login();
+      })
+      .then(function () {
+        return withScopeRetry(function () {
+          return ensureProjectsRootId().then(function (rootId) {
+            return putJsonInFolder(rootId, "projects_index.json", {
+              savedAt: new Date().toISOString(),
+              projects: list
+            }).then(function () { return list; });
+          });
+        });
+      });
+  }
+
+  function createProject(name) {
+    const label = String(name || "").trim();
+    if (!label) return Promise.reject(new Error("請輸入專案名稱"));
+    const folderName = sanitizeProjectFolderName(label);
+    const folderPath = projectsRootParts().concat([folderName]).join("/");
+    const proj = {
+      id: "p-" + Date.now().toString(36),
+      name: label,
+      folderPath: folderPath,
+      legacyFallback: false,
+      createdAt: new Date().toISOString()
+    };
+    return loadProjectsIndex().then(function (list) {
+      if (list.some(function (p) { return p.name === label; })) {
+        throw new Error("專案名稱已存在");
+      }
+      list.push(proj);
+      return saveProjectsIndex(list).then(function () {
+        // 先切到新專案並確保資料夾存在
+        setActiveProject(proj);
+        return ensureFolderId().then(function () { return proj; });
+      });
+    });
+  }
+
+  function findLegacyData() {
+    if (!activeProject || !activeProject.legacyFallback) return Promise.resolve(null);
+    const legacyName = (activeProject.legacyFileName || cfg.legacyFileName || "vivo_r01_line_data.json").replace(/'/g, "\\'");
+    const legacyParts = splitPath(activeProject.legacyFolderPath || cfg.legacyFolderPath || "");
+    if (!legacyParts.length) {
+      return driveListByQuery("name='" + legacyName + "' and trashed=false").then(function (files) {
+        if (!files.length) return null;
+        return fetchJsonById(files[0].id);
+      });
+    }
+    let chain = Promise.resolve("root");
+    legacyParts.forEach(function (part) {
+      chain = chain.then(function (parentId) {
+        return findChildFolder(parentId, part).then(function (id) { return id || ""; });
+      });
+    });
+    return chain.then(function (folderId) {
+      if (!folderId) return null;
+      let q = "name='" + legacyName + "' and trashed=false and '" + folderId + "' in parents";
+      return driveListByQuery(q).then(function (files) {
+        if (!files.length) return null;
+        return fetchJsonById(files[0].id);
+      });
+    });
   }
 
   function loadStoredFileId() {
@@ -453,20 +679,14 @@
     return driveListByQuery("name='" + name + "' and trashed=false");
   }
 
-  /** 先找指定資料夾，沒有再找整個雲端硬碟（根目錄舊檔也能找到） */
+  /** 只在目前專案資料夾找（多專案避免抓到別案的同名檔） */
   function findFileByName() {
     return findFilesInFolder().then(function (files) {
       if (files.length) {
         saveStoredFileId(files[0].id);
         return files[0].id;
       }
-      return findFilesAnywhere().then(function (all) {
-        if (all.length) {
-          saveStoredFileId(all[0].id);
-          return all[0].id;
-        }
-        return "";
-      });
+      return "";
     });
   }
 
@@ -565,17 +785,11 @@
       })
       .then(function () {
         return withScopeRetry(function () {
-          // 下載不新建空檔；先資料夾、再全碟，略過無內容的檔
           return findFilesInFolder().then(function (inFolder) {
             return downloadFirstNonEmpty(inFolder).then(function (data) {
               if (data) return data;
-              return findFilesAnywhere().then(function (anywhere) {
-                // 略過已在資料夾試過的 id
-                const tried = {};
-                inFolder.forEach(function (f) { tried[f.id] = true; });
-                const rest = anywhere.filter(function (f) { return !tried[f.id]; });
-                return downloadFirstNonEmpty(rest.length ? rest : anywhere);
-              });
+              // VIVO R01 相容：新專案資料夾尚無檔時，讀舊版路徑
+              return findLegacyData();
             });
           });
         });
@@ -904,7 +1118,13 @@
     listHistoryFiles: listHistoryFiles,
     saveHistoryJson: saveHistoryJson,
     loadHistoryJson: loadHistoryJson,
-    historyMax: historyMax
+    historyMax: historyMax,
+    getActiveProject: getActiveProject,
+    setActiveProject: setActiveProject,
+    loadProjectsIndex: loadProjectsIndex,
+    saveProjectsIndex: saveProjectsIndex,
+    createProject: createProject,
+    sanitizeProjectFolderName: sanitizeProjectFolderName
   };
 
   global.LineGoogle = api;
