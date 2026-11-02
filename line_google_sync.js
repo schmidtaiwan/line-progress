@@ -992,23 +992,30 @@
         if (!state.account) return login();
       })
       .then(function () {
-        return withScopeRetry(function () {
-          return ensureProjectsRootId().then(function (rootId) {
-            if (isSheetsMode()) {
-              return readIndexFromSheets().then(function (idx) {
-                return {
-                  rootId: rootId,
-                  data: { forceBuildId: idx.forceBuildId, projects: idx.projects },
-                  list: idx.projects || []
-                };
-              });
-            }
+        return ensureProjectsRootId().then(function (rootId) {
+          function fromJson() {
             return fetchJsonInFolder(rootId, "projects_index.json").then(function (data) {
               const list = (data && Array.isArray(data.projects))
                 ? data.projects.map(normalizeProjectRecord)
                 : [];
               return { rootId: rootId, data: data || null, list: list };
             });
+          }
+          if (!isSheetsMode()) return fromJson();
+          // Sheets 403／未開 API 時改讀 JSON，避免刪案整段失敗
+          return readIndexFromSheets().then(function (idx) {
+            const list = (idx.projects || []).filter(function (p) { return p && p.name; });
+            if (list.length) {
+              return {
+                rootId: rootId,
+                data: { forceBuildId: idx.forceBuildId, projects: list },
+                list: list
+              };
+            }
+            return fromJson();
+          }).catch(function (e) {
+            console.warn("讀 Sheets 索引失敗，改讀 JSON", e);
+            return fromJson();
           });
         });
       });
@@ -1214,19 +1221,8 @@
         if (!state.account) return login();
       })
       .then(function () {
-        return withScopeRetry(function () {
-          if (isSheetsMode()) {
-            return writeIndexToSheets(list);
-          }
-          return ensureProjectsRootId().then(function (rootId) {
-            const payload = {
-              savedAt: new Date().toISOString(),
-              projects: list
-            };
-            if (buildId) payload.forceBuildId = buildId;
-            return putJsonInFolder(rootId, "projects_index.json", payload).then(function () { return list; });
-          });
-        });
+        // 一律走 persistIndexList：先／保 JSON，Sheets 失敗不擋刪案／排序
+        return persistIndexList(list, buildId);
       });
   }
 
@@ -1317,16 +1313,24 @@
     });
   }
 
-  function deleteProject(projectId) {
+  function deleteProject(projectId, opts) {
+    opts = opts || {};
     const id = String(projectId || "");
     if (!id) return Promise.reject(new Error("缺少專案 ID"));
     // 用 raw 讀取，避免 loadProjectsIndex 先依資料夾把專案同步回來
     return readProjectsIndexRaw().then(function (raw) {
       let list = (raw && raw.list) || [];
+      // UI 傳入的目前清單可補 raw 漏讀（Sheets 空／403）
+      if (Array.isArray(opts.knownList) && opts.knownList.length) {
+        list = mergeProjectLists(list, opts.knownList);
+      }
       let hit = list.find(function (p) { return p && p.id === id; });
       // index 過期時，仍允許用目前作用中專案刪資料夾
       if (!hit && activeProject && String(activeProject.id) === id) {
         hit = normalizeProjectRecord(activeProject);
+      }
+      if (!hit && opts.fallbackProject) {
+        hit = normalizeProjectRecord(opts.fallbackProject);
       }
       if (!hit) throw new Error("找不到要刪除的專案");
       const next = list.filter(function (p) {
@@ -1336,13 +1340,21 @@
         if (normFolderKey(p.name) === normFolderKey(hit.name)) return false;
         return true;
       });
-      // ★ 先寫入較短清單（清單為準），再刪資料夾；資料夾刪失敗不回滾清單
+      // ★ 先寫入較短清單（JSON 為準；Sheets 失敗不擋），再刪資料夾／試算表
       return saveProjectsIndex(next).then(function () {
-        return deleteProjectFolder(hit).then(function () {
-          return next;
-        }).catch(function (err) {
-          console.warn("專案資料夾刪除失敗（清單已更新）", err);
-          return next;
+        const trashSheet = hit.spreadsheetId
+          ? trashOrDeleteDriveId(hit.spreadsheetId).catch(function (e) {
+              console.warn("刪除專案試算表失敗", e);
+            })
+          : Promise.resolve();
+        return trashSheet.then(function () {
+          return deleteProjectFolder(hit).then(function () {
+            return next;
+          }).catch(function (err) {
+            console.warn("專案資料夾刪除失敗（清單已更新）", err);
+            // 共用根無權刪別人資料夾時仍算刪案成功（清單已拿掉）
+            return next;
+          });
         });
       });
     });
