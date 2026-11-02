@@ -1566,7 +1566,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 58;
+const PAGE_BUILD = 59;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -2070,7 +2070,9 @@ function projectsMetaKey() {
 function storeKeyForProject(proj) {
   const pid = (proj && (proj.id || proj.name)) || "default";
   const who = accountScopeKey();
-  return "vivo_line_dash_" + who + "_" + String(pid).replace(/[^\w\-]+/g, "_") + "_" + (BASE.source || "default");
+  // 保留中文專案名／id，避免「R01機電工程」「R01機電前置」都被清成 R01_ 而撞鍵
+  const safe = String(pid).replace(/[\\\/:*?"<>|#%\s]+/g, "_");
+  return "vivo_line_dash_" + who + "_" + safe + "_" + (BASE.source || "default");
 }
 
 function setStoreKeyForProject(proj) {
@@ -2499,10 +2501,42 @@ function isBlankHierarchyTemplate() {
   return nodes.some(n => n.name === "階段一" || n.name === "工作項 A" || n.name === "工作項 1");
 }
 
+/** 僅水電／機電／R02 類專案才自動套 PDF 結構種子（勿套到 VIVO R01 等設備案） */
+function projectShouldUseMepSeed(name) {
+  return /水電|機電|R02/i.test(String(name || ""));
+}
+
+/** 偵測是否為 R02 水電 PDF 種子（前置作業／區域安裝等） */
+function payloadLooksLikeR02MepSeed(payload) {
+  if (!payload) return false;
+  const nodes = Array.isArray(payload.nodes) ? payload.nodes : [];
+  if (!nodes.length) return false;
+  const blob = nodes.map(n => String((n && n.name) || "")).join("|");
+  return /前置作業/.test(blob) && /設備製造|區域安裝|竣工驗收/.test(blob);
+}
+
+function vivoEquipmentRecoverPayload(proj) {
+  const d = clone(BASE);
+  const name = (proj && proj.name) || "VIVO R01";
+  return {
+    arch: "unified",
+    source: d.source,
+    title: name + "｜架線進度",
+    subtitle: d.subtitle,
+    savedAt: new Date().toISOString(),
+    equipment: clone(d.equipment || []),
+    milestones: clone(d.milestones || []),
+    stages: clone(d.stages || []),
+    segOrder: clone(d.segOrder || []),
+    nodes: []
+  };
+}
+
 function applyHierarchyPdfSeedSilent() {
   const saved = (typeof HIERARCHY_SEED_R02 === "object") ? HIERARCHY_SEED_R02 : null;
   if (!saved || !Array.isArray(saved.nodes)) return false;
   const name = (state.project && state.project.name) || "R02水電工程";
+  if (!projectShouldUseMepSeed(name)) return false;
   applyProjectPayload(Object.assign({}, saved, {
     title: name + "｜進度",
     projectName: name,
@@ -2536,14 +2570,24 @@ async function activateProject(proj, opts) {
     if (raw) {
       const saved = JSON.parse(raw);
       if (saved && (Array.isArray(saved.nodes) || Array.isArray(saved.equipment))) {
-        applyProjectPayload(saved);
-        loadedLocal = true;
+        // 本機若已遭誤套水電種子，不要先畫出來（等雲端還原或下面立刻還原）
+        if (payloadLooksLikeR02MepSeed(saved) && !projectShouldUseMepSeed(proj.name)
+          && !(Array.isArray(saved.equipment) && saved.equipment.length)) {
+          loadedLocal = false;
+        } else {
+          applyProjectPayload(saved);
+          loadedLocal = true;
+        }
       }
     }
   } catch (e) {}
   if (state.project) state.project.arch = "unified";
   if (!loadedLocal) {
-    applyProjectPayload(blankProjectPayload(proj.name));
+    if (!projectShouldUseMepSeed(proj.name) && (proj.legacyFallback || /^vivo\s*r0?1$/i.test(String(proj.name || "")))) {
+      applyProjectPayload(vivoEquipmentRecoverPayload(proj));
+    } else {
+      applyProjectPayload(blankProjectPayload(proj.name));
+    }
   }
   if (state.project) state.project.arch = "unified";
   syncTitleToProject(proj);
@@ -2561,11 +2605,27 @@ async function activateProject(proj, opts) {
       }
       const hasHier = cloud && Array.isArray(cloud.nodes) && cloud.nodes.length;
       const hasEq = cloud && Array.isArray(cloud.equipment) && cloud.equipment.length;
-      if (hasHier || hasEq || (cloud && Array.isArray(cloud.equipment))) {
+      // 非機電／水電專案卻載到 R02 水電種子 → 還原（VIVO R01 曾被誤套）
+      if (cloud && payloadLooksLikeR02MepSeed(cloud) && !projectShouldUseMepSeed(proj.name) && !hasEq) {
+        let recovered = null;
+        if (proj.legacyFallback && typeof LineOneDrive.findLegacyData === "function") {
+          try { recovered = await LineOneDrive.findLegacyData(); } catch (e) { console.warn(e); }
+        }
+        if (!recovered || !(Array.isArray(recovered.equipment) && recovered.equipment.length)) {
+          recovered = vivoEquipmentRecoverPayload(proj);
+        }
+        applyProjectPayload(recovered);
+        if (state.project) state.project.arch = "unified";
+        syncTitleToProject(proj);
+        await LineOneDrive.uploadJson(cloudPayload());
+        if (loadGen !== state.projectLoadGen) return;
+        state.dirty = false;
+        saveLocal("已還原「" + proj.name + "」正確資料（先前誤套水電／機電範本）", { clearDirty: true });
+      } else if (hasHier || hasEq || (cloud && Array.isArray(cloud.equipment))) {
         applyProjectPayload(cloud);
         if (state.project) state.project.arch = "unified";
-        // 空白層級範本（階段一／工作項 A）自動套用 PDF 水電進度表
-        if (isBlankHierarchyTemplate() && applyHierarchyPdfSeedSilent()) {
+        // 僅水電／機電／R02 的空白範本才自動套 PDF
+        if (isBlankHierarchyTemplate() && projectShouldUseMepSeed(proj.name) && applyHierarchyPdfSeedSilent()) {
           syncTitleToProject(proj);
           await LineOneDrive.uploadJson(cloudPayload());
           if (loadGen !== state.projectLoadGen) return;
@@ -2583,9 +2643,8 @@ async function activateProject(proj, opts) {
           }
         }
       } else if (opts.resetToBlank || !loadedLocal) {
-        const wantMepSeed = /水電|R02/i.test(String(proj.name || ""));
-        if (wantMepSeed && applyHierarchyPdfSeedSilent()) {
-          // 水電／R02 新建時帶入 PDF 種子
+        if (projectShouldUseMepSeed(proj.name) && applyHierarchyPdfSeedSilent()) {
+          // 水電／機電／R02 新建時帶入 PDF 種子
         } else {
           applyProjectPayload(blankProjectPayload(proj.name));
         }

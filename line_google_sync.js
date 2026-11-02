@@ -1626,6 +1626,7 @@
     accountEmail: accountEmail,
     isSharedProjectsRoot: isSharedProjectsRoot,
     downloadJson: downloadJson,
+    findLegacyData: findLegacyData,
     uploadJson: uploadJson,
     scheduleUpload: scheduleUpload,
     uploadPhoto: uploadPhoto,
