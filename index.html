@@ -433,6 +433,17 @@
     text-shadow: 0 1px 1px rgba(0,0,0,0.25);
     pointer-events: none; white-space: nowrap; padding: 0 4px;
   }
+  /* 時程過短（如評估起訖同日）條太窄時，% 改顯示在條右側，避免被裁切 */
+  .gantt-bar.narrow {
+    overflow: visible;
+    z-index: 5;
+  }
+  .gantt-bar.narrow .txt {
+    left: calc(100% + 3px); right: auto; width: max-content;
+    justify-content: flex-start; padding: 0;
+    color: #16324a;
+    text-shadow: 0 0 2px #fff, 0 0 4px #fff, 1px 0 0 #fff, -1px 0 0 #fff;
+  }
   .gantt-today {
     position: absolute; top: 0; bottom: 0; width: 2px;
     background: #c0392b; opacity: 0.85; z-index: 2; pointer-events: none;
@@ -1649,7 +1660,7 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=80"></script>
+<script src="google_config.js?v=81"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
@@ -1676,7 +1687,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 80;
+const PAGE_BUILD = 81;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -3852,9 +3863,19 @@ function ganttBarStyle(sp, range, color) {
   return {
     left: left.toFixed(3) + "%",
     width: width.toFixed(3) + "%",
+    widthPct: width,
     color,
     pct
   };
+}
+
+/** 甘特條 HTML；寬度過窄時加 narrow，把百分比放條外以免裁切 */
+function ganttBarHtml(st, text, title) {
+  const narrow = (st.widthPct || 0) < 5.5;
+  return `<div class="gantt-bar${narrow ? " narrow" : ""}" style="left:${st.left};width:${st.width};background:${st.color}" title="${escapeAttr(title)}">
+    <div class="fill" style="width:${st.pct}%"></div>
+    <div class="txt">${escapeHtml(text)}</div>
+  </div>`;
 }
 
 function renderLineGanttHtml() {
@@ -3922,10 +3943,8 @@ function renderLineGanttHtml() {
     if (!sp) return "";
     const st = ganttBarStyle(sp, range, STAGE_BAR_COLORS[si % STAGE_BAR_COLORS.length]);
     const label = (s.mark || s.name || "").slice(0, 2);
-    return `<div class="gantt-bar" style="left:${st.left};width:${st.width};background:${st.color}" title="${escapeAttr(s.name)} ${st.pct.toFixed(0)}%">
-      <div class="fill" style="width:${st.pct}%"></div>
-      <div class="txt">${escapeHtml(label)} ${st.pct.toFixed(0)}%</div>
-    </div>`;
+    const txt = label + " " + st.pct.toFixed(0) + "%";
+    return ganttBarHtml(st, txt, s.name + " " + st.pct.toFixed(0) + "%");
   }).join("");
 
   let overallPctSum = 0;
@@ -3957,10 +3976,7 @@ function renderLineGanttHtml() {
         const sp = stageSpanForEq(eq, si);
         if (!sp) return "";
         const st = ganttBarStyle(sp, range, STAGE_BAR_COLORS[si % STAGE_BAR_COLORS.length]);
-        return `<div class="gantt-bar" style="left:${st.left};width:${st.width};background:${st.color}" title="${escapeAttr(eq.name + "｜" + s.name + "｜" + pctText(sp.pct))}">
-          <div class="fill" style="width:${st.pct}%"></div>
-          <div class="txt">${st.pct.toFixed(0)}%</div>
-        </div>`;
+        return ganttBarHtml(st, st.pct.toFixed(0) + "%", eq.name + "｜" + s.name + "｜" + pctText(sp.pct));
       }).join("");
       const title = (eq.seg || "") + " " + (eq.idx || "") + " " + (eq.name || "");
       const nameTxt = ((eq.idx != null && eq.idx !== "" ? eq.idx + " " : "") + (eq.name || "")).trim() || "—";
