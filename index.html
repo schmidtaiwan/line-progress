@@ -1543,6 +1543,40 @@
     color: #b91c1c; border-color: #fecaca; background: #fff1f2;
   }
   .project-rail .btn-add-proj.danger-rail:hover { background: #ffe4e6; }
+  .project-rail .rail-cloud {
+    display: flex; flex-direction: column; gap: 4px;
+    margin: 8px 0 6px; padding-top: 8px; border-top: 1px dashed var(--line);
+  }
+  .project-rail .rail-icon-btn {
+    display: inline-flex; align-items: center; gap: 0;
+    width: max-content; max-width: 100%;
+    border: 1px solid #cbd5e1; background: #fff; color: #16324a;
+    border-radius: 10px; padding: 7px 9px; cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 650;
+    overflow: hidden; white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  }
+  .project-rail .rail-icon-btn .ico { flex: 0 0 auto; line-height: 1; font-size: 15px; }
+  .project-rail .rail-icon-btn .lbl {
+    display: inline-block; max-width: 0; opacity: 0; overflow: hidden;
+    margin-left: 0; transition: max-width 0.18s ease, opacity 0.15s ease, margin-left 0.15s ease;
+  }
+  .project-rail .rail-icon-btn:hover,
+  .project-rail .rail-icon-btn:focus-visible {
+    background: #e7f0f7; border-color: #2b6cb0; outline: none;
+  }
+  .project-rail .rail-icon-btn:hover .lbl,
+  .project-rail .rail-icon-btn:focus-visible .lbl {
+    max-width: 140px; opacity: 1; margin-left: 8px;
+  }
+  .project-rail .rail-icon-btn.viewer {
+    cursor: default; color: var(--muted); font-weight: 600;
+  }
+  .project-rail .rail-icon-btn.viewer:hover { background: #f8fafc; border-color: #cbd5e1; }
+  .project-rail .rail-icon-btn.danger:hover {
+    background: #fff1f2; border-color: #fda4af; color: #b91c1c;
+  }
+  .cloud-bar .btn-cloud[data-cloud-push] { margin-left: auto; }
   .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   body.locked .project-rail { display: none; }
   .sheets-embed-wrap {
@@ -1568,6 +1602,7 @@
   <h2 class="rail-title">專案</h2>
   <p class="rail-hint">點選切換；按住拖曳可排序；右鍵可複製／刪除／貼上</p>
   <div class="proj-list" id="projectList"></div>
+  <div class="rail-cloud" id="railCloud" aria-label="雲端操作"></div>
   <button type="button" class="btn-add-proj" data-add-project title="新增專案">＋ 新增專案</button>
   <button type="button" class="btn-add-proj" data-copy-project title="複製目前專案到剪貼簿">複製專案</button>
   <button type="button" class="btn-add-proj" data-paste-project title="將已複製專案貼上為新專案">貼上專案</button>
@@ -1686,7 +1721,7 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=86"></script>
+<script src="google_config.js?v=87"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
@@ -1713,7 +1748,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 86;
+const PAGE_BUILD = 87;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -3476,46 +3511,60 @@ function viewerBadgeHtml() {
   if (!logged) return `<span class="viewer-badge off" id="viewerBadge">連線查看：—</span>`;
   return `<span class="viewer-badge" id="viewerBadge" title="同一 Google 帳號在不同裝置／分頁登入會分別計算">連線查看：${n} 個</span>`;
 }
+function railIconBtn(attrs, ico, label, extraClass) {
+  const cls = "rail-icon-btn" + (extraClass ? " " + extraClass : "");
+  return `<button type="button" class="${cls}" ${attrs}><span class="ico">${ico}</span><span class="lbl">${escapeHtml(label)}</span></button>`;
+}
+
+function railCloudHtml() {
+  const logged = isCloudLoggedIn();
+  if (!logged) {
+    return railIconBtn('data-cloud-login title="登入 Google"', "🔑", "登入 Google");
+  }
+  const n = (window.LineOneDrive && LineOneDrive.state && LineOneDrive.state.viewers) || 0;
+  return `
+    <span class="rail-icon-btn viewer" id="viewerBadge" title="同一 Google 帳號在不同裝置／分頁登入會分別計算">
+      <span class="ico">👁</span><span class="lbl">連線查看：${n} 個</span>
+    </span>
+    ${railIconBtn('data-cloud-login title="重新登入／換帳"', "🔄", "重新登入")}
+    ${railIconBtn('data-cloud-pull title="從雲端載入目前專案"', "☁", "從雲端載入")}
+    ${railIconBtn('data-cloud-logout title="登出"', "🚪", "登出", "danger")}
+  `;
+}
+
+function updateRailCloud() {
+  const host = document.getElementById("railCloud");
+  if (!host) return;
+  host.innerHTML = railCloudHtml();
+}
+
 function cloudBarHtml() {
   const logged = isCloudLoggedIn();
   const saveCls = "btn-cloud" + (state.dirty ? " dirty" : "");
-  const saveLabel = state.dirty ? "儲存本專案＊" : "儲存本專案";
-  // 未登入：只顯示狀態＋登入按鈕
+  const saveLabel = state.dirty ? "儲存＊" : "儲存";
+  const msg = escapeHtml(window.LineOneDrive ? LineOneDrive.statusText() : "雲端模組未載入");
   if (!logged) {
     return `<div class="cloud-bar" id="cloudBar">
-      <span class="msg">${escapeHtml(window.LineOneDrive ? LineOneDrive.statusText() : "雲端模組未載入")}</span>
-      <button type="button" class="btn-cloud" data-cloud-login>🔑 登入 Google</button>
+      <span class="msg">${msg}</span>
     </div>`;
   }
   return `<div class="cloud-bar" id="cloudBar">
-      <span class="msg">${escapeHtml(window.LineOneDrive ? LineOneDrive.statusText() : "雲端模組未載入")}</span>
-      ${viewerBadgeHtml()}
-      <button type="button" class="btn-cloud" data-cloud-login>🔄 重新登入</button>
-      <button type="button" class="btn-cloud ghost" data-cloud-pull>☁ 從雲端載入</button>
+      <span class="msg">${msg}</span>
       <button type="button" class="${saveCls}" data-cloud-push title="只儲存目前專案到雲端">💾 ${saveLabel}</button>
-      <button type="button" class="btn-cloud ghost" data-cloud-logout>🚪 登出</button>
     </div>`;
 }
 function updateCloudBar() {
+  updateRailCloud();
   const el = document.getElementById("cloudBar");
   if (!el || !window.LineOneDrive) return;
   const logged = isCloudLoggedIn();
-  // 登入狀態改變時重建按鈕組（未登入只留登入鈕）
-  const hasExtra = !!el.querySelector("[data-cloud-pull], [data-cloud-push], [data-cloud-logout]");
-  if ((!logged && hasExtra) || (logged && !hasExtra)) {
+  const hasSave = !!el.querySelector("[data-cloud-push]");
+  if ((!logged && hasSave) || (logged && !hasSave)) {
     el.outerHTML = cloudBarHtml();
     return;
   }
   const msg = el.querySelector(".msg");
   if (msg) msg.textContent = LineOneDrive.statusText();
-  const badge = el.querySelector("#viewerBadge");
-  if (badge) {
-    const n = LineOneDrive.state.viewers || 0;
-    badge.classList.toggle("off", !logged);
-    badge.textContent = logged ? ("連線查看：" + n + " 個") : "連線查看：—";
-  }
-  const loginBtn = el.querySelector("[data-cloud-login]");
-  if (loginBtn) loginBtn.textContent = logged ? "🔄 重新登入" : "🔑 登入 Google";
   const saveBtn = el.querySelector("[data-cloud-push]");
   if (saveBtn) {
     saveBtn.textContent = state.dirty ? "💾 儲存＊" : "💾 儲存";
@@ -5542,6 +5591,7 @@ function render() {
   document.getElementById("subtitle").textContent = DATA.subtitle;
   updateFoot();
   renderProjectRail();
+  updateRailCloud();
   if (state.tab === "overview") state.tab = "items";
   document.querySelectorAll("nav.tabs button").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.tab === state.tab);
