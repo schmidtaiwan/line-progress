@@ -1582,7 +1582,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 56;
+const PAGE_BUILD = 57;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -3946,14 +3946,16 @@ function buildEquipmentMasterHtml() {
 
 /** 總覽表頭：階段名稱＋設定頁該製程段×階段的預計開始～完成 */
 function overviewStageHeadHtml() {
+  const eqs = visibleEq() || [];
   const segs = state.seg === "全部"
-    ? Array.from(new Set((visibleEq() || []).map(eq => eq.seg).filter(Boolean)))
+    ? Array.from(new Set(eqs.map(eq => eq.seg).filter(Boolean)))
     : [state.seg];
   const useSegs = segs.length ? segs : ((DATA.segOrder || []).slice());
   const ai = assessmentStageIndex();
   return (DATA.stages || []).map((s, si) => {
     const ranges = useSegs.map(seg => {
-      const m = milestoneForSeg(seg);
+      const sampleEq = eqs.find(eq => eq.seg === seg) || { seg: seg };
+      const m = milestoneForEquipment(sampleEq, si) || milestoneForSeg(seg);
       if (!m) return "";
       let start = (m.starts && m.starts[si]) || "";
       let due = (m.dates && m.dates[si]) || "";
@@ -4259,7 +4261,7 @@ function buildItemsDetailHtml(eq) {
           </tr></thead>
           <tbody>${itemRows}</tbody>
         </table></div>
-        <p class="note">點細項名稱可展開備註；點「預計完成」可下拉設定預計開始／預計完成／實際完成時間。右鍵日期欄可套用設定頁「製程段×階段」預設時程（選單會顯示預設日期）。</p>
+        <p class="note">點細項名稱可展開備註；點「預計完成」可下拉設定預計開始／預計完成／實際完成時間。右鍵日期欄可套用設定頁預設時程：依目前所選階段抓對應欄（例：在評估就抓評估）；選單會顯示日期。</p>
     </div>`;
 }
 
@@ -5016,7 +5018,6 @@ function milestoneForSeg(seg) {
   const list = DATA.milestones || [];
   let m = list.find(x => x && x.seg === name);
   if (m) return m;
-  // 去空白比對（DIP_D02 vs 測試段 仍各自分開；僅處理空白差異）
   const key = name.replace(/\s+/g, "").toLowerCase();
   return list.find(x => String((x && x.seg) || "").replace(/\s+/g, "").toLowerCase() === key) || null;
 }
@@ -5029,24 +5030,79 @@ function readMileStartDue(m, si) {
   };
 }
 
+function mileRichness(m) {
+  if (!m) return 0;
+  let n = 0;
+  (m.dates || []).forEach(function (d) { if (d) n += 1; });
+  (m.starts || []).forEach(function (d) { if (d) n += 1; });
+  return n;
+}
+
 /**
- * 設定頁「製程段 × 階段」預設時程。
- * 若目前階段未填，改抓「評估階段」的開始／完成時間。
+ * 找出此設備應對應的設定列。
+ * 設備標籤可能是「測試段」，設定列卻是「DIP_D02」→ 優先用「目前階段有填日期」的那一列。
+ */
+function milestoneForEquipment(eq, stageIdx) {
+  const list = DATA.milestones || [];
+  if (!eq || !list.length) return null;
+  const si = Number.isFinite(stageIdx) ? stageIdx : state.stage;
+  const exact = milestoneForSeg(eq.seg);
+  function hasStage(m) {
+    const d = readMileStartDue(m, si);
+    return !!(d.start || d.due);
+  }
+  if (exact && hasStage(exact)) return exact;
+  if (exact && mileRichness(exact) > 0) return exact;
+
+  const pname = String((state.project && state.project.name) || "").replace(/\s+/g, "").toLowerCase();
+  if (pname) {
+    const byProj = list.find(function (x) {
+      const s = String((x && x.seg) || "").replace(/\s+/g, "").toLowerCase();
+      if (!s) return false;
+      return pname.indexOf(s) >= 0 || s.indexOf(pname) >= 0
+        || pname.indexOf(s.replace(/_/g, "")) >= 0
+        || s.replace(/_/g, "").indexOf(pname) >= 0;
+    });
+    if (byProj && (hasStage(byProj) || mileRichness(byProj) > 0)) return byProj;
+  }
+
+  const withStage = list.filter(hasStage).slice().sort(function (a, b) {
+    return mileRichness(b) - mileRichness(a);
+  });
+  if (withStage.length === 1) return withStage[0];
+  if (withStage.length > 1) return withStage[0];
+
+  const richest = list.slice().sort(function (a, b) {
+    return mileRichness(b) - mileRichness(a);
+  })[0];
+  if (richest && mileRichness(richest) > 0) return richest;
+  return exact || richest || null;
+}
+
+/**
+ * 預設時程＝設定頁「對應列 × 目前所選階段」。
+ * 例：送板機現在在「評估階段」→ 抓設定裡該列的評估開始／完成。
+ * 僅當「目前階段」欄位空白時，才回退評估階段欄。
  */
 function getSegStageDefaultDates(stageIdx) {
   const eq = DATA.equipment && DATA.equipment[state.eq];
-  if (!eq || !eq.seg) {
-    return { start: "", due: "", seg: "", stageName: "", fromAssessment: false, sourceStageName: "" };
+  if (!eq) {
+    return {
+      start: "", due: "", seg: "", mileSeg: "", stageName: "",
+      fromAssessment: false, sourceStageName: ""
+    };
   }
   const si = Number.isFinite(stageIdx) ? stageIdx : state.stage;
-  const m = milestoneForSeg(eq.seg);
+  const m = milestoneForEquipment(eq, si);
+  const mileSeg = (m && m.seg) || eq.seg || "";
   const stageName = (DATA.stages[si] && (DATA.stages[si].name || DATA.stages[si].mark)) || ("階段" + (si + 1));
   const cur = readMileStartDue(m, si);
   let start = cur.start;
   let due = cur.due;
   let fromAssessment = false;
   let sourceStageName = stageName;
-  if (!start || !due) {
+  // 目前階段欄位未填 → 同列改抓「評估階段」
+  if ((!start || !due) && m) {
     const ai = assessmentStageIndex();
     if (ai !== si) {
       const fallback = readMileStartDue(m, ai);
@@ -5066,7 +5122,8 @@ function getSegStageDefaultDates(stageIdx) {
   return {
     start: start,
     due: due,
-    seg: eq.seg,
+    seg: eq.seg || mileSeg,
+    mileSeg: mileSeg,
     stageName: stageName,
     fromAssessment: fromAssessment,
     sourceStageName: sourceStageName
@@ -5115,17 +5172,20 @@ function showDateCtxMenu(x, y, input) {
   const showGrab = inItemList && !inMileMatrix && !isHierarchyArch() && !isProjectsOverview();
   const defs = showGrab
     ? getSegStageDefaultDates(state.stage)
-    : { start: "", due: "", seg: "", stageName: "", fromAssessment: false, sourceStageName: "" };
-  const srcLabel = defs.fromAssessment
-    ? (defs.seg + " × " + (defs.sourceStageName || "評估階段") + "（目前階段未填，改用評估）")
-    : (defs.seg ? ("設定頁：" + defs.seg + " × " + defs.stageName) : "請先在設定頁填寫各製程段時程");
+    : { start: "", due: "", seg: "", mileSeg: "", stageName: "", fromAssessment: false, sourceStageName: "" };
+  const mileLabel = defs.mileSeg || defs.seg || "";
+  const stageLabel = defs.fromAssessment ? (defs.sourceStageName || "評估階段") : defs.stageName;
+  const srcLabel = mileLabel
+    ? ("設定頁：" + mileLabel + " × " + stageLabel
+      + (defs.fromAssessment ? "（目前階段未填，改用評估）" : "（依目前所選階段）"))
+    : "請先在設定頁填寫各製程段時程";
   if (grabDueBtn) {
     grabDueBtn.style.display = showGrab ? "" : "none";
     grabDueBtn.disabled = !defs.due;
     grabDueBtn.style.opacity = defs.due ? "1" : "0.55";
     grabDueBtn.textContent = defs.due
-      ? ("套用預設完成 " + displayDateSlash(defs.due) + (defs.fromAssessment ? "（評估階段）" : ""))
-      : "套用預設完成（評估階段亦未填）";
+      ? ("套用預設完成 " + displayDateSlash(defs.due) + "（" + stageLabel + "）")
+      : "套用預設完成（設定頁此階段未填）";
     grabDueBtn.title = srcLabel;
   }
   if (grabStartBtn) {
@@ -5133,8 +5193,8 @@ function showDateCtxMenu(x, y, input) {
     grabStartBtn.disabled = !defs.start;
     grabStartBtn.style.opacity = defs.start ? "1" : "0.55";
     grabStartBtn.textContent = defs.start
-      ? ("套用預設開始 " + displayDateSlash(defs.start) + (defs.fromAssessment ? "（評估階段）" : ""))
-      : "套用預設開始（評估階段亦未填）";
+      ? ("套用預設開始 " + displayDateSlash(defs.start) + "（" + stageLabel + "）")
+      : "套用預設開始（設定頁此階段未填）";
     grabStartBtn.title = srcLabel;
   }
   if (grabBothBtn) {
@@ -5146,8 +5206,8 @@ function showDateCtxMenu(x, y, input) {
     if (defs.start) parts.push("始 " + displayDateSlash(defs.start));
     if (defs.due) parts.push("完 " + displayDateSlash(defs.due));
     grabBothBtn.textContent = parts.length
-      ? ("套用預設開始＋完成（" + parts.join("／") + ")" + (defs.fromAssessment ? "（評估階段）" : ""))
-      : "套用預設開始＋完成（評估階段亦未填）";
+      ? ("套用預設開始＋完成（" + parts.join("／") + "｜" + stageLabel + "）")
+      : "套用預設開始＋完成（設定頁此階段未填）";
     grabBothBtn.title = srcLabel;
   }
   if (pasteBtn) {
@@ -5286,9 +5346,9 @@ function applySegStageDefaultsToItemInput(input, mode) {
       btn.classList.toggle("empty", !dueText);
     });
   }
-  const via = defs.fromAssessment
-    ? (defs.seg + "×" + (defs.sourceStageName || "評估階段") + "（目前階段未填）")
-    : (defs.seg + "×" + (defs.stageName || ""));
+  const via = (defs.mileSeg || defs.seg || "") + "×"
+    + (defs.fromAssessment ? (defs.sourceStageName || "評估階段") : (defs.stageName || ""))
+    + (defs.fromAssessment ? "（目前階段未填）" : "");
   toast("已套用預設（" + via + "）：" + msg.join("、"));
   return true;
 }
