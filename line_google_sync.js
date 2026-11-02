@@ -595,15 +595,66 @@
     });
   }
 
+  /** 刪除專案在共用根下的資料夾（含 line_data／photos／history） */
+  function deleteProjectFolder(proj) {
+    const name = String((proj && proj.name) || "").trim();
+    if (!name) return Promise.resolve();
+    const folderName = sanitizeProjectFolderName(name);
+    return ensureProjectsRootId().then(function (rootId) {
+      return findChildFolder(rootId, folderName).then(function (folderId) {
+        if (!folderId) return;
+        const key = projCacheKey(proj);
+        if (key) {
+          delete folderIdByProject[key];
+          delete fileIdByProject[key];
+        }
+        if (activeProject && projCacheKey(activeProject) === key) {
+          cachedFolderId = "";
+          state.fileId = "";
+        }
+        return withScopeRetry(function () {
+          return driveFetch(
+            "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(folderId) + "?supportsAllDrives=true",
+            { method: "DELETE" }
+          ).then(function (res) {
+            if (res.status === 404 || res.ok) return;
+            // 無法永久刪除時改丟進垃圾桶（資料夾內檔案一併處理）
+            return driveFetch(
+              "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(folderId) + "?supportsAllDrives=true",
+              {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ trashed: true })
+              }
+            ).then(function (r2) {
+              if (r2.status === 404 || r2.ok) return;
+              return r2.text().then(function (t) {
+                throw new Error("刪除雲端資料夾失敗 " + r2.status + " " + t);
+              });
+            });
+          });
+        });
+      });
+    }).then(function () {
+      try {
+        const root = sharedProjectsRootId() || "";
+        if (root) delete childFolderListCache[root];
+        delete childFolderListCache["root"];
+      } catch (e) {}
+    });
+  }
+
   function deleteProject(projectId) {
     const id = String(projectId || "");
     if (!id) return Promise.reject(new Error("缺少專案 ID"));
     return loadProjectsIndex().then(function (list) {
+      const hit = list.find(function (p) { return p && p.id === id; });
+      if (!hit) throw new Error("找不到要刪除的專案");
       const next = list.filter(function (p) { return p.id !== id; });
-      if (next.length === list.length) {
-        throw new Error("找不到要刪除的專案");
-      }
-      return saveProjectsIndex(next).then(function () { return next; });
+      // 先刪雲端資料夾，再更新清單（失敗則整筆中止，避免清單沒了資料夾還在）
+      return deleteProjectFolder(hit).then(function () {
+        return saveProjectsIndex(next).then(function () { return next; });
+      });
     });
   }
 
