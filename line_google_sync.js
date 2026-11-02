@@ -115,18 +115,144 @@
     return chain;
   }
 
+  function legacyPersonalRootName() {
+    return String(cfg.legacyProjectsRoot || "架線進度專案").trim() || "架線進度專案";
+  }
+
+  function normalizeProjectRecord(p) {
+    const name = String((p && p.name) || "未命名");
+    const folderName = sanitizeProjectFolderName(name);
+    return {
+      id: String((p && (p.id || p.name)) || folderName),
+      name: name,
+      folderPath: projectsRootParts().concat([folderName]).join("/"),
+      arch: p && p.arch === "hierarchy" ? "hierarchy" : "equipment",
+      legacyFallback: !!(p && p.legacyFallback),
+      legacyFolderPath: (p && p.legacyFolderPath) || "",
+      legacyFileName: (p && p.legacyFileName) || "",
+      createdAt: (p && p.createdAt) || ""
+    };
+  }
+
   /** 專案資料夾相對共用根／projectsRoot 的路徑片段（通常只有專案名稱） */
   function projectFolderWalkParts() {
     const parts = folderPathParts();
     const rootParts = projectsRootParts();
+    const legacyRoot = splitPath(legacyPersonalRootName());
     let walk = parts.slice();
-    let i = 0;
-    while (i < rootParts.length && i < walk.length && walk[i] === rootParts[i]) i += 1;
-    walk = walk.slice(i);
+    function stripPrefix(prefix) {
+      let i = 0;
+      while (i < prefix.length && i < walk.length && walk[i] === prefix[i]) i += 1;
+      if (i > 0) walk = walk.slice(i);
+    }
+    stripPrefix(rootParts);
+    stripPrefix(legacyRoot);
     if (!walk.length && activeProject && activeProject.name) {
       walk = [sanitizeProjectFolderName(activeProject.name)];
     }
     return walk;
+  }
+
+  function findPersonalProjectsRootId() {
+    const name = legacyPersonalRootName();
+    return findChildFolder("root", name).then(function (id) {
+      if (id) return id;
+      const safe = name.replace(/'/g, "\\'");
+      return driveListByQuery(
+        "mimeType='application/vnd.google-apps.folder' and name='" + safe + "' and trashed=false"
+      ).then(function (files) {
+        return (files[0] && files[0].id) || "";
+      });
+    });
+  }
+
+  function ensureNamedChildFolder(parentId, name) {
+    return findChildFolder(parentId, name).then(function (id) {
+      if (id) return id;
+      return createChildFolder(parentId, name);
+    });
+  }
+
+  /** 把單一專案的 line_data.json 從舊根複製到共用根 */
+  function copyProjectJsonToShared(sharedRootId, oldRootId, proj) {
+    const name = String((proj && proj.name) || "").trim();
+    if (!name) return Promise.resolve(null);
+    const folderName = sanitizeProjectFolderName(name);
+    const oldParts = splitPath((proj && proj.folderPath) || "");
+    const oldFolderName = oldParts.length ? oldParts[oldParts.length - 1] : folderName;
+    return findChildFolder(oldRootId, oldFolderName).then(function (oldId) {
+      if (!oldId && oldFolderName !== folderName) return findChildFolder(oldRootId, folderName);
+      return oldId;
+    }).then(function (oldProjId) {
+      if (!oldProjId) return null;
+      return fetchJsonInFolder(oldProjId, fileName()).then(function (payload) {
+        if (!payload) return null;
+        return ensureNamedChildFolder(sharedRootId, folderName).then(function (newProjId) {
+          return putJsonInFolder(newProjId, fileName(), payload).then(function () {
+            return normalizeProjectRecord(proj);
+          });
+        });
+      });
+    });
+  }
+
+  /**
+   * 共用根若尚無／僅有預設清單，從個人「架線進度專案」遷移專案清單與 JSON。
+   * 之後所有讀寫都以共用根為準。
+   */
+  function migrateIntoSharedRootIfNeeded(sharedRootId, sharedList) {
+    if (!isSharedProjectsRoot()) return Promise.resolve(sharedList || []);
+    return findPersonalProjectsRootId().then(function (oldRoot) {
+      if (!oldRoot || oldRoot === sharedRootId) return sharedList || [];
+      return fetchJsonInFolder(oldRoot, "projects_index.json").then(function (data) {
+        const oldList = (data && Array.isArray(data.projects)) ? data.projects : [];
+        if (!oldList.length) return sharedList || [];
+        const shared = sharedList || [];
+        const byName = {};
+        shared.forEach(function (p) { byName[String(p.name || "")] = true; });
+        const onlyDefault =
+          shared.length === 0 ||
+          (shared.length === 1 &&
+            (/^vivo-r01$/i.test(String(shared[0].id || "")) || /^vivo\s*r0?1$/i.test(String(shared[0].name || ""))));
+        const missing = oldList.filter(function (p) {
+          return p && p.name && !byName[String(p.name)];
+        });
+        const toCopy = onlyDefault && oldList.length ? oldList : missing;
+        if (!toCopy.length) return shared;
+        let chain = Promise.resolve([]);
+        toCopy.forEach(function (p) {
+          chain = chain.then(function (acc) {
+            return copyProjectJsonToShared(sharedRootId, oldRoot, p).then(function (rec) {
+              acc.push(rec || normalizeProjectRecord(p));
+              return acc;
+            }).catch(function () {
+              acc.push(normalizeProjectRecord(p));
+              return acc;
+            });
+          });
+        });
+        return chain.then(function (copied) {
+          let next;
+          if (onlyDefault) next = copied;
+          else next = shared.map(normalizeProjectRecord).concat(copied);
+          // 去重（同名保留先出現）
+          const seen = {};
+          next = next.filter(function (p) {
+            const n = String(p.name || "");
+            if (!n || seen[n]) return false;
+            seen[n] = true;
+            return true;
+          });
+          return putJsonInFolder(sharedRootId, "projects_index.json", {
+            savedAt: new Date().toISOString(),
+            migratedFrom: legacyPersonalRootName(),
+            projects: next
+          }).then(function () { return next; });
+        });
+      });
+    }).catch(function () {
+      return sharedList || [];
+    });
   }
 
   function defaultProjectsList() {
@@ -245,24 +371,17 @@
           return ensureProjectsRootId().then(function (rootId) {
             return fetchJsonInFolder(rootId, "projects_index.json").then(function (data) {
               let list = (data && Array.isArray(data.projects)) ? data.projects : [];
-              if (!list.length) {
-                list = defaultProjectsList();
-                return putJsonInFolder(rootId, "projects_index.json", {
-                  savedAt: new Date().toISOString(),
-                  projects: list
-                }).then(function () { return list; });
-              }
-              return list.map(function (p) {
-                return {
-                  id: String(p.id || p.name || ""),
-                  name: String(p.name || "未命名"),
-                  folderPath: String(p.folderPath || projectsRootParts().concat([sanitizeProjectFolderName(p.name)]).join("/")),
-                  arch: p.arch === "hierarchy" ? "hierarchy" : "equipment",
-                  legacyFallback: !!p.legacyFallback,
-                  legacyFolderPath: p.legacyFolderPath || "",
-                  legacyFileName: p.legacyFileName || "",
-                  createdAt: p.createdAt || ""
-                };
+              list = list.map(normalizeProjectRecord);
+              return migrateIntoSharedRootIfNeeded(rootId, list).then(function (migrated) {
+                list = (migrated && migrated.length) ? migrated.map(normalizeProjectRecord) : list;
+                if (!list.length) {
+                  list = defaultProjectsList().map(normalizeProjectRecord);
+                  return putJsonInFolder(rootId, "projects_index.json", {
+                    savedAt: new Date().toISOString(),
+                    projects: list
+                  }).then(function () { return list; });
+                }
+                return list;
               });
             });
           });
@@ -1110,7 +1229,8 @@
         state.viewers > 0
           ? "　｜　連線查看 " + state.viewers + " 個"
           : "";
-      const share = isSharedProjectsRoot() ? "　｜　共用資料夾" : "";
+      const rootLabel = (cfg.projectsRoot || "共用資料夾").trim() || "共用資料夾";
+      const share = isSharedProjectsRoot() ? ("　｜　儲存於「" + rootLabel + "」") : "";
       return "Google 雲端　｜　已登入 " + who + share + view +
         (state.lastCloudAt ? "　｜　上次雲端 " + state.lastCloudAt.replace("T", " ").slice(0, 19) : "");
     }

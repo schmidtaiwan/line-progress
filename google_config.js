@@ -1,30 +1,27 @@
 /* Google Cloud OAuth 用戶端（網頁應用程式）
  *
- * 多專案：每個專案一個資料夾
- *   {projectsRoot}/{專案名稱}/line_data.json
- *   {projectsRoot}/{專案名稱}/photos/
- *   {projectsRoot}/{專案名稱}/history/
- *   {projectsRoot}/projects_index.json  ← 專案清單
+ * 多專案：全部寫入共用根資料夾（projectsRootId）
+ *   {共用根}/projects_index.json
+ *   {共用根}/{專案名稱}/line_data.json
+ *   {共用根}/{專案名稱}/photos/
+ *   {共用根}/{專案名稱}/history/
  *
- * 多帳號同讀同一份資料（建議做法）：
- * 1. 選定「主帳號」（資料最完整的那一個，例如 jason660803@…）
- * 2. 開啟該帳 Drive →「架線進度專案」資料夾
- * 3. 網址列複製資料夾 ID：
- *    https://drive.google.com/drive/folders/【這一段就是 ID】
- * 4. 對該資料夾「共用」給其他帳號，權限選「編輯者」
- * 5. 把 ID 填入下方 projectsRootId（有填就走共用；空白＝各帳各自一份）
+ * 目前共用根＝「網頁專案使用」
+ *   https://drive.google.com/drive/folders/1kXxR9OFtjchcNzl-3mDEPcOeZAitAtAd
  *
- * 舊版單資料夾（VIVO R01 相容）：
- *   legacyFolderPath + legacyFileName 仍可讀取，首次儲存會寫入新專案資料夾
+ * 首次載入若共用根尚無清單，會自動從舊資料夾「架線進度專案」遷移專案 JSON。
  */
 window.GOOGLE_CONFIG = {
   clientId: "90391506221-41kb4us4hsuq7go94udf3o17hr2f9uoh.apps.googleusercontent.com",
 
-  // 所有專案的父資料夾名稱（未設 projectsRootId 時，相對於「我的雲端硬碟」）
-  projectsRoot: "架線進度專案",
+  // 顯示／路徑用名稱（實際位置以 projectsRootId 為準）
+  projectsRoot: "網頁專案使用",
 
-  // 多帳號共用：填主帳號「架線進度專案」的資料夾 ID（空白＝各帳獨立）
+  // 多帳號共用根資料夾 ID（所有儲存都進這裡）
   projectsRootId: "1kXxR9OFtjchcNzl-3mDEPcOeZAitAtAd",
+
+  // 舊版個人根（遷移來源；不再寫入）
+  legacyProjectsRoot: "架線進度專案",
 
   // 專案內統一檔名
   fileName: "line_data.json",

@@ -1551,7 +1551,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 48;
+const PAGE_BUILD = 49;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -2285,10 +2285,11 @@ function renderProjectRail() {
   const who = isCloudLoggedIn() ? accountScopeKey() : "";
   if (who && who !== "anon") {
     const shared = !!(window.LineOneDrive && typeof LineOneDrive.isSharedProjectsRoot === "function" && LineOneDrive.isSharedProjectsRoot());
+    const rootName = (window.GOOGLE_CONFIG && GOOGLE_CONFIG.projectsRoot) || "網頁專案使用";
     const tip = shared
-      ? "多帳號共用同一份雲端資料夾（google_config.projectsRootId）"
-      : "專案清單來自此帳號的「我的雲端硬碟／架線進度專案」；要同讀請設 projectsRootId";
-    html += `<p class="rail-hint" title="${escapeAttr(tip)}">帳號：${escapeHtml(who)}${shared ? "　｜　共用資料" : ""}</p>`;
+      ? ("所有專案讀寫都進共用資料夾「" + rootName + "」")
+      : "專案清單來自此帳號的「我的雲端硬碟」";
+    html += `<p class="rail-hint" title="${escapeAttr(tip)}">帳號：${escapeHtml(who)}${shared ? "　｜　" + escapeHtml(rootName) : ""}</p>`;
   }
   if (state.projectsLoading) {
     host.innerHTML = html + `<p class="rail-hint">載入專案中…</p>`;
