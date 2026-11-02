@@ -1540,7 +1540,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "" };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0 };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1551,7 +1551,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 51;
+const PAGE_BUILD = 52;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -2429,10 +2429,18 @@ async function activateProject(proj, opts) {
   }
   if (state.project) state.project.arch = projectArchOf(DATA);
   syncTitleToProject(proj);
+  // 先立刻換畫面（本機），雲端在背景同步 → 切換體感接近瞬間
+  const loadGen = (state.projectLoadGen = (state.projectLoadGen || 0) + 1);
+  const switchedToId = proj.id;
+  render();
+
   if (opts.fromCloud && window.LineOneDrive && isCloudLoggedIn()) {
     try {
-      toast("載入專案「" + proj.name + "」…");
+      if (!loadedLocal) toast("載入專案「" + proj.name + "」…");
       const cloud = await LineOneDrive.downloadJson();
+      if (loadGen !== state.projectLoadGen || !state.project || state.project.id !== switchedToId) {
+        return; // 使用者已又切到別案，丟棄過期結果
+      }
       const hasHier = cloud && projectArchOf(cloud) === "hierarchy" && Array.isArray(cloud.nodes);
       const hasEq = cloud && Array.isArray(cloud.equipment) && cloud.equipment.length;
       if (hasHier || hasEq || (cloud && Array.isArray(cloud.equipment))) {
@@ -2442,12 +2450,19 @@ async function activateProject(proj, opts) {
         if (isBlankHierarchyTemplate() && applyHierarchyPdfSeedSilent()) {
           syncTitleToProject(proj);
           await LineOneDrive.uploadJson(cloudPayload());
+          if (loadGen !== state.projectLoadGen) return;
           state.dirty = false;
           saveLocal("已匯入 PDF 層級進度到「" + proj.name + "」", { clearDirty: true });
         } else {
           syncTitleToProject(proj);
           state.dirty = false;
-          saveLocal("已載入專案「" + proj.name + "」", { clearDirty: true });
+          // 有本機時靜默寫回快取，不跳「已載入」干擾切換
+          try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
+          if (!loadedLocal) {
+            saveLocal("已載入專案「" + proj.name + "」", { clearDirty: true });
+          } else {
+            render();
+          }
         }
       } else if (opts.resetToBlank || !loadedLocal) {
         const wantMepSeed = archHint === "hierarchy" && /水電|R02/i.test(String(proj.name || ""));
@@ -2459,18 +2474,18 @@ async function activateProject(proj, opts) {
         if (state.project) state.project.arch = projectArchOf(DATA) || archHint;
         syncTitleToProject(proj);
         await LineOneDrive.uploadJson(cloudPayload());
+        if (loadGen !== state.projectLoadGen) return;
         state.dirty = false;
         saveLocal("已建立專案資料夾「" + proj.name + "」", { clearDirty: true });
-      } else {
-        toast("專案「" + proj.name + "」雲端尚無資料，使用本機內容");
+      } else if (!loadedLocal) {
+        toast("專案「" + proj.name + "」雲端尚無資料");
       }
     } catch (e) {
+      if (loadGen !== state.projectLoadGen) return;
       console.warn(e);
-      toast("載入專案失敗：" + (e.message || e));
+      if (!loadedLocal) toast("載入專案失敗：" + (e.message || e));
     }
   }
-  syncTitleToProject(proj);
-  render();
 }
 
 function openNewProjectModal() {
