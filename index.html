@@ -1721,7 +1721,7 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=87"></script>
+<script src="google_config.js?v=88"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
@@ -1748,7 +1748,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 87;
+const PAGE_BUILD = 88;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -3543,9 +3543,11 @@ function cloudBarHtml() {
   const saveCls = "btn-cloud" + (state.dirty ? " dirty" : "");
   const saveLabel = state.dirty ? "儲存＊" : "儲存";
   const msg = escapeHtml(window.LineOneDrive ? LineOneDrive.statusText() : "雲端模組未載入");
+  // 未登入時左側專案列隱藏，登入鈕必須留在 cloud bar（登入閘道）
   if (!logged) {
     return `<div class="cloud-bar" id="cloudBar">
       <span class="msg">${msg}</span>
+      <button type="button" class="btn-cloud" data-cloud-login>🔑 登入 Google</button>
     </div>`;
   }
   return `<div class="cloud-bar" id="cloudBar">
@@ -3559,7 +3561,8 @@ function updateCloudBar() {
   if (!el || !window.LineOneDrive) return;
   const logged = isCloudLoggedIn();
   const hasSave = !!el.querySelector("[data-cloud-push]");
-  if ((!logged && hasSave) || (logged && !hasSave)) {
+  const hasLogin = !!el.querySelector("[data-cloud-login]");
+  if ((!logged && hasSave) || (logged && !hasSave) || (!logged && !hasLogin) || (logged && hasLogin)) {
     el.outerHTML = cloudBarHtml();
     return;
   }
