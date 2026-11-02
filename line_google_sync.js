@@ -1305,6 +1305,150 @@
       });
   }
 
+  function listFileRevisions(fileId) {
+    if (!fileId) return Promise.resolve([]);
+    return driveFetch(
+      "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) +
+      "/revisions?fields=revisions(id,modifiedTime)&pageSize=40&supportsAllDrives=true"
+    ).then(function (res) {
+      if (!res.ok) return [];
+      return res.json().then(function (data) {
+        const revs = (data && data.revisions) || [];
+        return revs.slice().reverse(); // 新→舊
+      });
+    }).catch(function () { return []; });
+  }
+
+  function fetchJsonRevision(fileId, revId) {
+    if (!fileId || !revId) return Promise.resolve(null);
+    return driveFetch(
+      "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) +
+      "/revisions/" + encodeURIComponent(revId) + "?alt=media&supportsAllDrives=true"
+    ).then(function (res) {
+      if (!res.ok) return null;
+      return res.text().then(function (text) {
+        if (!text || !String(text).trim()) return null;
+        try { return JSON.parse(text); } catch (e) { return null; }
+      });
+    }).catch(function () { return null; });
+  }
+
+  function listJsonFilesInFolder(folderId) {
+    if (!folderId) return Promise.resolve([]);
+    const q = "'" + folderId + "' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'";
+    return driveFetch(
+      "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
+      "&fields=files(id,name,modifiedTime)&pageSize=50&spaces=drive&supportsAllDrives=true&includeItemsFromAllDrives=true&orderBy=modifiedTime desc"
+    ).then(function (res) {
+      if (!res.ok) return [];
+      return res.json().then(function (data) {
+        return ((data && data.files) || []).filter(function (f) {
+          return /\.json$/i.test(f.name || "");
+        });
+      });
+    }).catch(function () { return []; });
+  }
+
+  /**
+   * 在共用根下掃描各專案 line_data／history／Drive 版次，找出符合 accept(data, meta) 的 JSON。
+   * 用於跨案誤植後把 DIP 等資料從別案版次回救。
+   */
+  function findRecoverablePayload(acceptFn, opts) {
+    opts = opts || {};
+    const maxRevsPerFile = Math.max(1, Number(opts.maxRevisions) || 8);
+    if (typeof acceptFn !== "function") return Promise.resolve(null);
+    return withScopeRetry(function () {
+      return ensureProjectsRootId().then(function (rootId) {
+        return listChildFolders(rootId, { bypassCache: true }).then(function (folders) {
+          let chain = Promise.resolve(null);
+          (folders || []).forEach(function (folder) {
+            chain = chain.then(function (hit) {
+              if (hit) return hit;
+              if (!folder || !folder.id) return null;
+              const folderName = folder.name || "";
+              return listJsonFilesInFolder(folder.id).then(function (files) {
+                const main = (files || []).find(function (f) {
+                  return String(f.name || "").toLowerCase() === String(fileName()).toLowerCase();
+                });
+                const histFolderPromise = listChildFolders(folder.id).then(function (subs) {
+                  const hname = historyFolderName();
+                  const hf = (subs || []).find(function (s) {
+                    return String(s.name || "") === hname;
+                  });
+                  return hf ? listJsonFilesInFolder(hf.id) : [];
+                }).catch(function () { return []; });
+
+                return histFolderPromise.then(function (histFiles) {
+                  const candidates = [];
+                  if (main && main.id) {
+                    candidates.push({
+                      kind: "line",
+                      folderName: folderName,
+                      fileId: main.id,
+                      modifiedTime: main.modifiedTime || ""
+                    });
+                  }
+                  (histFiles || []).forEach(function (f) {
+                    candidates.push({
+                      kind: "history",
+                      folderName: folderName,
+                      fileId: f.id,
+                      modifiedTime: f.modifiedTime || "",
+                      name: f.name || ""
+                    });
+                  });
+
+                  let inner = Promise.resolve(null);
+                  candidates.forEach(function (cand) {
+                    inner = inner.then(function (found) {
+                      if (found) return found;
+                      return fetchJsonById(cand.fileId).then(function (data) {
+                        if (data && acceptFn(data, cand)) {
+                          return { data: data, meta: cand };
+                        }
+                        return null;
+                      });
+                    });
+                  });
+
+                  // line_data 版次（錯置被覆蓋前常還留在 revision）
+                  if (main && main.id) {
+                    inner = inner.then(function (found) {
+                      if (found) return found;
+                      return listFileRevisions(main.id).then(function (revs) {
+                        let rchain = Promise.resolve(null);
+                        (revs || []).slice(0, maxRevsPerFile).forEach(function (rev) {
+                          rchain = rchain.then(function (found2) {
+                            if (found2) return found2;
+                            return fetchJsonRevision(main.id, rev.id).then(function (data) {
+                              if (!data) return null;
+                              const meta = {
+                                kind: "revision",
+                                folderName: folderName,
+                                fileId: main.id,
+                                revId: rev.id,
+                                modifiedTime: rev.modifiedTime || ""
+                              };
+                              if (acceptFn(data, meta)) return { data: data, meta: meta };
+                              return null;
+                            });
+                          });
+                        });
+                        return rchain;
+                      });
+                    });
+                  }
+                  return inner;
+                });
+              });
+            });
+          });
+          return chain;
+        });
+      });
+    });
+  }
+
   /** 依序嘗試多個候選檔，略過空檔（避免誤建的空 JSON） */
   function downloadFirstNonEmpty(files) {
     let chain = Promise.resolve(null);
@@ -1729,6 +1873,7 @@
     listHistoryFiles: listHistoryFiles,
     saveHistoryJson: saveHistoryJson,
     loadHistoryJson: loadHistoryJson,
+    findRecoverablePayload: findRecoverablePayload,
     historyMax: historyMax,
     getActiveProject: getActiveProject,
     setActiveProject: setActiveProject,
