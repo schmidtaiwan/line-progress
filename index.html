@@ -1504,6 +1504,9 @@
   </div>
 </div>
 <div class="date-ctx-menu" id="dateCtxMenu" role="menu">
+  <button type="button" data-date-ctx="grab-due">套用預設完成</button>
+  <button type="button" data-date-ctx="grab-start">套用預設開始</button>
+  <button type="button" data-date-ctx="grab-both">套用預設開始＋完成</button>
   <button type="button" data-date-ctx="copy">複製日期</button>
   <button type="button" data-date-ctx="paste">貼上日期</button>
   <button type="button" data-date-ctx="clear">清除日期</button>
@@ -1562,7 +1565,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 53;
+const PAGE_BUILD = 54;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -4219,7 +4222,7 @@ function buildItemsDetailHtml(eq) {
           </tr></thead>
           <tbody>${itemRows}</tbody>
         </table></div>
-        <p class="note">點細項名稱可展開備註；點「預計完成」可下拉設定預計開始／預計完成／實際完成時間。</p>
+        <p class="note">點細項名稱可展開備註；點「預計完成」可下拉設定預計開始／預計完成／實際完成時間。右鍵日期欄可套用設定頁「製程段×階段」預設時程（選單會顯示預設日期）。</p>
     </div>`;
 }
 
@@ -4963,6 +4966,48 @@ function resolveDateInputFromEvent(ev) {
   return null;
 }
 
+/** 設定頁「製程段 × 階段」預設時程（依目前設備製程段＋目前階段） */
+function getSegStageDefaultDates(stageIdx) {
+  const eq = DATA.equipment && DATA.equipment[state.eq];
+  if (!eq || !eq.seg) return { start: "", due: "", seg: "", stageName: "" };
+  const si = Number.isFinite(stageIdx) ? stageIdx : state.stage;
+  const m = (DATA.milestones || []).find(x => x && x.seg === eq.seg);
+  const stageName = (DATA.stages[si] && (DATA.stages[si].name || DATA.stages[si].mark)) || ("階段" + (si + 1));
+  if (!m) return { start: "", due: "", seg: eq.seg, stageName: stageName };
+  return {
+    start: normalizeDateValue((m.starts && m.starts[si]) || "") || "",
+    due: normalizeDateValue((m.dates && m.dates[si]) || "") || "",
+    seg: eq.seg,
+    stageName: stageName
+  };
+}
+
+function findSiblingItemDateInput(input, field) {
+  if (!input) return null;
+  const wrap = input.closest(".date-drop") || input.closest(".date-cell") || input.closest("tr, .m-item-card");
+  if (!wrap) return null;
+  return wrap.querySelector('input[type="date"][data-field="' + field + '"]');
+}
+
+function ensureItemDatesOpen(input) {
+  if (!input) return;
+  const idxAttr = input.getAttribute("data-item-idx");
+  const idx = idxAttr != null ? Number(idxAttr) : NaN;
+  if (!Number.isFinite(idx)) return;
+  if (state.openDates !== idx) {
+    state.openDates = idx;
+    // 局部打開下拉，避免整頁重繪丟掉右鍵目標
+    document.querySelectorAll(".date-drop").forEach(el => {
+      const forIdx = Number(el.getAttribute("data-dates-for"));
+      el.classList.toggle("open", forIdx === idx);
+    });
+    document.querySelectorAll(".date-hit").forEach(el => {
+      const t = el.getAttribute("data-toggle-dates");
+      el.classList.toggle("open", Number(t) === idx);
+    });
+  }
+}
+
 function showDateCtxMenu(x, y, input) {
   const menu = document.getElementById("dateCtxMenu");
   if (!menu || !input) return;
@@ -4971,6 +5016,47 @@ function showDateCtxMenu(x, y, input) {
   const hasVal = !!normalizeDateValue(input.value);
   const pasteBtn = menu.querySelector('[data-date-ctx="paste"]');
   const copyBtn = menu.querySelector('[data-date-ctx="copy"]');
+  const grabDueBtn = menu.querySelector('[data-date-ctx="grab-due"]');
+  const grabStartBtn = menu.querySelector('[data-date-ctx="grab-start"]');
+  const grabBothBtn = menu.querySelector('[data-date-ctx="grab-both"]');
+  const inItemList = !!(input.getAttribute("data-item-idx") != null || input.closest(".date-cell, .date-drop"));
+  const inMileMatrix = input.matches("[data-mile-start], [data-mile-due]");
+  const showGrab = inItemList && !inMileMatrix && !isHierarchyArch() && !isProjectsOverview();
+  const defs = showGrab ? getSegStageDefaultDates(state.stage) : { start: "", due: "", seg: "", stageName: "" };
+  const defTip = defs.seg
+    ? ("設定頁：" + defs.seg + " × " + defs.stageName)
+    : "請先在設定頁填寫各製程段時程";
+  if (grabDueBtn) {
+    grabDueBtn.style.display = showGrab ? "" : "none";
+    grabDueBtn.disabled = !defs.due;
+    grabDueBtn.style.opacity = defs.due ? "1" : "0.55";
+    grabDueBtn.textContent = defs.due
+      ? ("套用預設完成 " + displayDateSlash(defs.due))
+      : "套用預設完成（設定頁未填）";
+    grabDueBtn.title = defTip;
+  }
+  if (grabStartBtn) {
+    grabStartBtn.style.display = showGrab ? "" : "none";
+    grabStartBtn.disabled = !defs.start;
+    grabStartBtn.style.opacity = defs.start ? "1" : "0.55";
+    grabStartBtn.textContent = defs.start
+      ? ("套用預設開始 " + displayDateSlash(defs.start))
+      : "套用預設開始（設定頁未填）";
+    grabStartBtn.title = defTip;
+  }
+  if (grabBothBtn) {
+    grabBothBtn.style.display = showGrab ? "" : "none";
+    const ok = !!(defs.start || defs.due);
+    grabBothBtn.disabled = !ok;
+    grabBothBtn.style.opacity = ok ? "1" : "0.55";
+    const parts = [];
+    if (defs.start) parts.push("始 " + displayDateSlash(defs.start));
+    if (defs.due) parts.push("完 " + displayDateSlash(defs.due));
+    grabBothBtn.textContent = parts.length
+      ? ("套用預設開始＋完成（" + parts.join("／") + "）")
+      : "套用預設開始＋完成（設定頁未填）";
+    grabBothBtn.title = defTip;
+  }
   if (pasteBtn) {
     pasteBtn.disabled = false;
     pasteBtn.style.opacity = hasClip ? "1" : "0.55";
@@ -5070,6 +5156,47 @@ function pasteDateToInput(input) {
   return applyDateToInput(input, raw);
 }
 
+function applySegStageDefaultsToItemInput(input, mode) {
+  if (!input) return false;
+  const defs = getSegStageDefaultDates(state.stage);
+  if (!defs.start && !defs.due) {
+    toast("設定頁尚未填寫此製程段×階段的預設時程");
+    return false;
+  }
+  ensureItemDatesOpen(input);
+  const dueInput = findSiblingItemDateInput(input, "due") || (input.getAttribute("data-field") === "due" ? input : null);
+  const startInput = findSiblingItemDateInput(input, "start") || (input.getAttribute("data-field") === "start" ? input : null);
+  let msg = [];
+  if ((mode === "due" || mode === "both") && defs.due && dueInput) {
+    applyDateToInput(dueInput, defs.due, { silentToast: true });
+    msg.push("完成 " + displayDateSlash(defs.due));
+  }
+  if ((mode === "start" || mode === "both") && defs.start && startInput) {
+    applyDateToInput(startInput, defs.start, { silentToast: true });
+    msg.push("開始 " + displayDateSlash(defs.start));
+  }
+  if (!msg.length) {
+    if (mode === "due" && !defs.due) toast("設定頁未填此階段的「預計完成」");
+    else if (mode === "start" && !defs.start) toast("設定頁未填此階段的「預計開始」");
+    else toast("找不到可套用的日期欄");
+    return false;
+  }
+  // 更新清單上「預計完成」按鈕文字
+  const eq = DATA.equipment[state.eq];
+  const idxAttr = (dueInput || startInput || input).getAttribute("data-item-idx");
+  const idx = idxAttr != null ? Number(idxAttr) : NaN;
+  if (eq && Number.isFinite(idx) && eq.stages[state.stage] && eq.stages[state.stage].items[idx]) {
+    const it = eq.stages[state.stage].items[idx];
+    const dueText = displayDue(it);
+    document.querySelectorAll('.date-hit[data-toggle-dates="' + idx + '"]').forEach(btn => {
+      btn.textContent = dueText || "設定日期";
+      btn.classList.toggle("empty", !dueText);
+    });
+  }
+  toast("已套用預設（" + (defs.seg || "") + "×" + (defs.stageName || "") + "）：" + msg.join("、"));
+  return true;
+}
+
 function runDateCtxAction(kind, input) {
   if (!input) {
     toast("找不到目標日期欄");
@@ -5078,6 +5205,9 @@ function runDateCtxAction(kind, input) {
   if (kind === "copy") copyDateFromInput(input);
   else if (kind === "paste") pasteDateToInput(input);
   else if (kind === "clear") applyDateToInput(input, "");
+  else if (kind === "grab-due") applySegStageDefaultsToItemInput(input, "due");
+  else if (kind === "grab-start") applySegStageDefaultsToItemInput(input, "start");
+  else if (kind === "grab-both") applySegStageDefaultsToItemInput(input, "both");
 }
 
 function escapeHtml(s) {
