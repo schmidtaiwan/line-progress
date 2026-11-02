@@ -88,6 +88,18 @@
     state.fileId = "";
   }
 
+  /** 清除目前專案的 folder／file 快取（誤連到別案檔時強制重解析） */
+  function clearActiveFileCache() {
+    const key = projCacheKey(activeProject);
+    if (key) {
+      delete folderIdByProject[key];
+      delete fileIdByProject[key];
+    }
+    cachedFolderId = "";
+    state.fileId = "";
+    try { saveStoredFileId(""); } catch (e) {}
+  }
+
   function clearAllProjectCaches() {
     clearFolderCache();
     Object.keys(folderIdByProject).forEach(function (k) { delete folderIdByProject[k]; });
@@ -1627,6 +1639,7 @@
     isSharedProjectsRoot: isSharedProjectsRoot,
     downloadJson: downloadJson,
     findLegacyData: findLegacyData,
+    clearActiveFileCache: clearActiveFileCache,
     uploadJson: uploadJson,
     scheduleUpload: scheduleUpload,
     uploadPhoto: uploadPhoto,

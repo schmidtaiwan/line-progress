@@ -1566,7 +1566,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 59;
+const PAGE_BUILD = 60;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -2506,6 +2506,12 @@ function projectShouldUseMepSeed(name) {
   return /水電|機電|R02/i.test(String(name || ""));
 }
 
+function isVivoLineProject(proj) {
+  if (!proj) return false;
+  if (proj.legacyFallback) return true;
+  return /^vivo\s*r0?1$/i.test(String(proj.name || "").trim());
+}
+
 /** 偵測是否為 R02 水電 PDF 種子（前置作業／區域安裝等） */
 function payloadLooksLikeR02MepSeed(payload) {
   if (!payload) return false;
@@ -2513,6 +2519,45 @@ function payloadLooksLikeR02MepSeed(payload) {
   if (!nodes.length) return false;
   const blob = nodes.map(n => String((n && n.name) || "")).join("|");
   return /前置作業/.test(blob) && /設備製造|區域安裝|竣工驗收/.test(blob);
+}
+
+/** 機電／水電內容（含已轉成設備列的誤資料） */
+function payloadLooksLikeForeignMep(payload) {
+  if (!payload) return false;
+  if (payloadLooksLikeR02MepSeed(payload)) return true;
+  const segs = (payload.segOrder || []).join("|");
+  if (/前置作業/.test(segs) && /設備製造|區域安裝|竣工驗收/.test(segs)) return true;
+  const eqs = (payload.equipment || []).map(e => String((e && e.name) || "")).join("|");
+  if (/得標通知|採購發包|保險作業|配電盤/.test(eqs)) return true;
+  const text = [payload.title, payload.subtitle, payload.source].map(x => String(x || "")).join("|");
+  if (/R02|電力.*CDA|CDA.*排氣|層級進度|晶睿.*TY2/i.test(text) && !/VIVO|電控需求/i.test(text)) return true;
+  return false;
+}
+
+/** 是否像 VIVO 架線設備資料 */
+function payloadLooksLikeVivoLine(payload) {
+  if (!payload) return false;
+  const segs = (payload.segOrder || []).join("|");
+  if (/板階段|組裝段|測試段/.test(segs)) return true;
+  const eqs = (payload.equipment || []).map(e => String((e && e.name) || "")).join("|");
+  if (/送板機|收板機/.test(eqs)) return true;
+  const stages = (payload.stages || []).map(s => String((s && s.name) || "")).join("|");
+  if (/架線前準備|架機|單機測試|整線測試/.test(stages)) return true;
+  if (/VIVO|電控需求/i.test(String(payload.source || ""))) return true;
+  return false;
+}
+
+/** VIVO（或非機電案）載到機電／水電內容時要強制還原 */
+function shouldForceRecoverProjectPayload(proj, payload) {
+  if (!proj || !payload) return false;
+  if (projectShouldUseMepSeed(proj.name)) return false;
+  if (payloadLooksLikeForeignMep(payload)) return true;
+  if (isVivoLineProject(proj) && !payloadLooksLikeVivoLine(payload)) {
+    const hasData = (Array.isArray(payload.equipment) && payload.equipment.length)
+      || (Array.isArray(payload.nodes) && payload.nodes.length);
+    return !!hasData;
+  }
+  return false;
 }
 
 function vivoEquipmentRecoverPayload(proj) {
@@ -2523,6 +2568,8 @@ function vivoEquipmentRecoverPayload(proj) {
     source: d.source,
     title: name + "｜架線進度",
     subtitle: d.subtitle,
+    built: d.built,
+    note: d.note,
     savedAt: new Date().toISOString(),
     equipment: clone(d.equipment || []),
     milestones: clone(d.milestones || []),
@@ -2530,6 +2577,32 @@ function vivoEquipmentRecoverPayload(proj) {
     segOrder: clone(d.segOrder || []),
     nodes: []
   };
+}
+
+async function forceRecoverWrongProjectData(proj) {
+  if (typeof LineOneDrive.clearActiveFileCache === "function") {
+    LineOneDrive.clearActiveFileCache();
+  }
+  let recovered = null;
+  if (proj && proj.legacyFallback && typeof LineOneDrive.findLegacyData === "function") {
+    try { recovered = await LineOneDrive.findLegacyData(); } catch (e) { console.warn(e); }
+  }
+  if (!recovered || !payloadLooksLikeVivoLine(recovered)) {
+    recovered = vivoEquipmentRecoverPayload(proj);
+  } else {
+    recovered = Object.assign({}, recovered, {
+      arch: "unified",
+      title: ((proj && proj.name) || "VIVO R01") + "｜架線進度",
+      projectName: (proj && proj.name) || "VIVO R01"
+    });
+  }
+  applyProjectPayload(recovered);
+  if (state.project) state.project.arch = "unified";
+  DATA.title = ((proj && proj.name) || "VIVO R01") + "｜架線進度";
+  if (recovered.subtitle) DATA.subtitle = recovered.subtitle;
+  await LineOneDrive.uploadJson(cloudPayload());
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
+  return recovered;
 }
 
 function applyHierarchyPdfSeedSilent() {
@@ -2570,9 +2643,8 @@ async function activateProject(proj, opts) {
     if (raw) {
       const saved = JSON.parse(raw);
       if (saved && (Array.isArray(saved.nodes) || Array.isArray(saved.equipment))) {
-        // 本機若已遭誤套水電種子，不要先畫出來（等雲端還原或下面立刻還原）
-        if (payloadLooksLikeR02MepSeed(saved) && !projectShouldUseMepSeed(proj.name)
-          && !(Array.isArray(saved.equipment) && saved.equipment.length)) {
+        // 本機若是機電／水電誤資料，略過（含已轉成設備列的情況）
+        if (shouldForceRecoverProjectPayload(proj, saved)) {
           loadedLocal = false;
         } else {
           applyProjectPayload(saved);
@@ -2583,7 +2655,7 @@ async function activateProject(proj, opts) {
   } catch (e) {}
   if (state.project) state.project.arch = "unified";
   if (!loadedLocal) {
-    if (!projectShouldUseMepSeed(proj.name) && (proj.legacyFallback || /^vivo\s*r0?1$/i.test(String(proj.name || "")))) {
+    if (isVivoLineProject(proj)) {
       applyProjectPayload(vivoEquipmentRecoverPayload(proj));
     } else {
       applyProjectPayload(blankProjectPayload(proj.name));
@@ -2599,28 +2671,30 @@ async function activateProject(proj, opts) {
   if (opts.fromCloud && window.LineOneDrive && isCloudLoggedIn()) {
     try {
       if (!loadedLocal) toast("載入專案「" + proj.name + "」…");
-      const cloud = await LineOneDrive.downloadJson();
+      let cloud = await LineOneDrive.downloadJson();
       if (loadGen !== state.projectLoadGen || !state.project || state.project.id !== switchedToId) {
         return; // 使用者已又切到別案，丟棄過期結果
       }
+      // 快取 fileId 可能指到別案：清快取後重抓專案資料夾內檔案
+      if (cloud && shouldForceRecoverProjectPayload(proj, cloud)) {
+        if (typeof LineOneDrive.clearActiveFileCache === "function") {
+          LineOneDrive.clearActiveFileCache();
+        }
+        try {
+          const again = await LineOneDrive.downloadJson();
+          if (again && !shouldForceRecoverProjectPayload(proj, again)) cloud = again;
+        } catch (e) { console.warn(e); }
+      }
+      if (loadGen !== state.projectLoadGen || !state.project || state.project.id !== switchedToId) return;
+
       const hasHier = cloud && Array.isArray(cloud.nodes) && cloud.nodes.length;
       const hasEq = cloud && Array.isArray(cloud.equipment) && cloud.equipment.length;
-      // 非機電／水電專案卻載到 R02 水電種子 → 還原（VIVO R01 曾被誤套）
-      if (cloud && payloadLooksLikeR02MepSeed(cloud) && !projectShouldUseMepSeed(proj.name) && !hasEq) {
-        let recovered = null;
-        if (proj.legacyFallback && typeof LineOneDrive.findLegacyData === "function") {
-          try { recovered = await LineOneDrive.findLegacyData(); } catch (e) { console.warn(e); }
-        }
-        if (!recovered || !(Array.isArray(recovered.equipment) && recovered.equipment.length)) {
-          recovered = vivoEquipmentRecoverPayload(proj);
-        }
-        applyProjectPayload(recovered);
-        if (state.project) state.project.arch = "unified";
-        syncTitleToProject(proj);
-        await LineOneDrive.uploadJson(cloudPayload());
+      // VIVO／非機電案卻載到機電內容（含設備列）→ 強制還原
+      if (cloud && shouldForceRecoverProjectPayload(proj, cloud)) {
+        await forceRecoverWrongProjectData(proj);
         if (loadGen !== state.projectLoadGen) return;
         state.dirty = false;
-        saveLocal("已還原「" + proj.name + "」正確資料（先前誤套水電／機電範本）", { clearDirty: true });
+        saveLocal("已還原「" + proj.name + "」正確資料（先前誤套／誤連機電內容）", { clearDirty: true });
       } else if (hasHier || hasEq || (cloud && Array.isArray(cloud.equipment))) {
         applyProjectPayload(cloud);
         if (state.project) state.project.arch = "unified";
@@ -2645,6 +2719,8 @@ async function activateProject(proj, opts) {
       } else if (opts.resetToBlank || !loadedLocal) {
         if (projectShouldUseMepSeed(proj.name) && applyHierarchyPdfSeedSilent()) {
           // 水電／機電／R02 新建時帶入 PDF 種子
+        } else if (isVivoLineProject(proj)) {
+          applyProjectPayload(vivoEquipmentRecoverPayload(proj));
         } else {
           applyProjectPayload(blankProjectPayload(proj.name));
         }
