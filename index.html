@@ -1566,7 +1566,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 63;
+const PAGE_BUILD = 64;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -2547,27 +2547,57 @@ function payloadLooksLikeVivoLine(payload) {
   return false;
 }
 
-/** 內容是否與專案不符（需強制還原） */
+/** 內容指紋：dip / vivo / mep / unknown（用來抓跨專案誤植） */
+function payloadProjectFingerprint(payload) {
+  if (!payload) return "unknown";
+  const segs = (payload.segOrder || []).join("|");
+  const stages = (payload.stages || []).map(s => String((s && s.name) || "")).join("|");
+  const eqs = (payload.equipment || []).map(e => String((e && (e.name || e.seg)) || "")).join("|");
+  const nodes = (payload.nodes || []).map(n => String((n && n.name) || "")).slice(0, 12).join("|");
+  const meta = [payload.projectName, payload.title, payload.source].map(x => String(x || "")).join("|");
+  const blob = [meta, segs, stages, eqs, nodes].join("||");
+
+  if (/DIP_D02|DIP自動換線|自動換線/i.test(blob)) return "dip";
+  if (/評估階段/.test(stages) && /報價|試機/.test(stages) && (/DIP/i.test(segs + eqs) || /DIP/i.test(meta))) return "dip";
+
+  if (/板階段|組裝段|測試段/.test(segs) && /架線前準備|架機|單機測試/.test(stages)) return "vivo";
+  if (/送板機/.test(eqs) && /架線前準備/.test(stages)) return "vivo";
+  if (/VIVO|TW1_VIVO|電控需求/i.test(meta)) return "vivo";
+
+  if (/前置作業|設備製造|區域安裝|竣工驗收/.test(segs + nodes + stages)) return "mep";
+  if (/得標通知|採購發包|配電盤/.test(eqs + nodes)) return "mep";
+  if (/機電|水電|R02|電力.*CDA|層級進度/i.test(meta)) return "mep";
+
+  return "unknown";
+}
+
+function expectedProjectFingerprint(proj) {
+  if (!proj) return "unknown";
+  if (isVivoLineProject(proj)) return "vivo";
+  const n = String(proj.name || "");
+  if (/DIP|自動換線/i.test(n)) return "dip";
+  if (/機電|水電|R02/i.test(n)) return "mep";
+  return "unknown";
+}
+
+/** 內容是否與專案不符（跨專案誤植／錯檔） */
 function shouldForceRecoverProjectPayload(proj, payload) {
   if (!proj || !payload) return false;
-  const name = String(proj.name || "");
-  // 機電／水電專案：不套用此還原
-  if (projectShouldUseMepSeed(name)) return false;
+  const hasData = (Array.isArray(payload.equipment) && payload.equipment.length)
+    || (Array.isArray(payload.nodes) && payload.nodes.length);
+  if (!hasData) return false;
 
-  if (isVivoLineProject(proj)) {
-    // VIVO 卻是機電內容 → 還原
-    if (payloadLooksLikeForeignMep(payload)) return true;
-    // VIVO 卻完全不像架線設備 → 還原
-    if (!payloadLooksLikeVivoLine(payload)) {
-      const hasData = (Array.isArray(payload.equipment) && payload.equipment.length)
-        || (Array.isArray(payload.nodes) && payload.nodes.length);
-      return !!hasData;
-    }
-    return false;
+  // 檔內明確標了別的專案 ID／名稱
+  if (payload.projectId && proj.id && String(payload.projectId) !== String(proj.id)) return true;
+  if (payload.projectName && proj.name) {
+    const pn = String(payload.projectName).trim();
+    const jn = String(proj.name).trim();
+    if (pn && jn && pn !== jn && pn.indexOf(jn) < 0 && jn.indexOf(pn) < 0) return true;
   }
 
-  // DIP 等非 VIVO：若內容是 VIVO 架線（板階段／送板機／電控需求）→ 誤植，必須清掉
-  if (payloadLooksLikeVivoLine(payload)) return true;
+  const got = payloadProjectFingerprint(payload);
+  const want = expectedProjectFingerprint(proj);
+  if (got !== "unknown" && want !== "unknown" && got !== want) return true;
   return false;
 }
 
@@ -2593,6 +2623,7 @@ function vivoEquipmentRecoverPayload(proj) {
 
 async function tryRecoverFromHistory(proj) {
   if (!window.LineOneDrive || typeof LineOneDrive.listHistoryFiles !== "function") return null;
+  const want = expectedProjectFingerprint(proj);
   try {
     const files = await LineOneDrive.listHistoryFiles();
     for (let i = 0; i < (files || []).length; i++) {
@@ -2602,7 +2633,8 @@ async function tryRecoverFromHistory(proj) {
       try { data = await LineOneDrive.loadHistoryJson(f.id); } catch (e) { continue; }
       if (!data) continue;
       if (shouldForceRecoverProjectPayload(proj, data)) continue;
-      if (!isVivoLineProject(proj) && payloadLooksLikeVivoLine(data)) continue;
+      const got = payloadProjectFingerprint(data);
+      if (want !== "unknown" && got !== "unknown" && got !== want) continue;
       return data;
     }
   } catch (e) {
@@ -2611,44 +2643,68 @@ async function tryRecoverFromHistory(proj) {
   return null;
 }
 
+function blankPayloadForProject(proj) {
+  const label = (proj && proj.name) || "新專案";
+  const kind = expectedProjectFingerprint(proj);
+  if (kind === "vivo") return vivoEquipmentRecoverPayload(proj);
+  if (kind === "mep") {
+    const seed = (typeof HIERARCHY_SEED_R02 === "object") ? clone(HIERARCHY_SEED_R02) : null;
+    if (seed && Array.isArray(seed.nodes)) {
+      return Object.assign({}, seed, {
+        arch: "unified",
+        title: label + "｜進度",
+        projectName: label,
+        projectId: (proj && proj.id) || "",
+        equipment: [],
+        savedAt: new Date().toISOString()
+      });
+    }
+  }
+  const blank = blankProjectPayload(label);
+  blank.projectName = label;
+  blank.projectId = (proj && proj.id) || "";
+  blank.title = label + "｜進度";
+  return blank;
+}
+
 async function forceRecoverWrongProjectData(proj) {
   if (typeof LineOneDrive.clearActiveFileCache === "function") {
     LineOneDrive.clearActiveFileCache();
   }
   const label = (proj && proj.name) || "專案";
+  const want = expectedProjectFingerprint(proj);
   let recovered = null;
   let note = "";
 
-  if (isVivoLineProject(proj)) {
+  if (want === "vivo") {
     if (proj.legacyFallback && typeof LineOneDrive.findLegacyData === "function") {
       try { recovered = await LineOneDrive.findLegacyData(); } catch (e) { console.warn(e); }
     }
-    if (!recovered || !payloadLooksLikeVivoLine(recovered)) {
+    if (!recovered || payloadProjectFingerprint(recovered) !== "vivo") {
       recovered = vivoEquipmentRecoverPayload(proj);
       note = "已還原 VIVO 內建／舊檔資料";
     } else {
       recovered = Object.assign({}, recovered, {
         arch: "unified",
         title: label + "｜架線進度",
-        projectName: label
+        projectName: label,
+        projectId: (proj && proj.id) || ""
       });
       note = "已自舊路徑還原 VIVO 資料";
     }
   } else {
-    // 絕不可把 VIVO BASE 寫進 DIP 等專案
     recovered = await tryRecoverFromHistory(proj);
     if (recovered) {
       recovered = Object.assign({}, recovered, {
         arch: "unified",
         title: label + "｜進度",
-        projectName: label
+        projectName: label,
+        projectId: (proj && proj.id) || ""
       });
       note = "已自雲端歷史還原「" + label + "」";
     } else {
-      recovered = blankProjectPayload(label);
-      recovered.projectName = label;
-      recovered.title = label + "｜進度";
-      note = "偵測到「" + label + "」誤載 VIVO 內容，已清空（請從歷史還原或重新匯入）";
+      recovered = blankPayloadForProject(proj);
+      note = "偵測到「" + label + "」內容與專案不符（可能與其他專案檔案錯置），已重置。請從歷史還原或重新匯入。";
     }
   }
 
@@ -2660,6 +2716,27 @@ async function forceRecoverWrongProjectData(proj) {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
   if (note) toast(note);
   return recovered;
+}
+
+/** 切換／暫存前：內容與專案不符就不要寫回，避免污染 */
+function safePersistCurrentProjectLocal() {
+  if (!state.project || isProjectsOverview()) return;
+  try {
+    const snap = {
+      projectId: state.project.id,
+      projectName: state.project.name,
+      title: DATA.title,
+      subtitle: DATA.subtitle,
+      source: DATA.source,
+      equipment: DATA.equipment,
+      nodes: DATA.nodes,
+      stages: DATA.stages,
+      segOrder: DATA.segOrder,
+      milestones: DATA.milestones
+    };
+    if (shouldForceRecoverProjectPayload(state.project, snap)) return;
+    localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload()));
+  } catch (e) {}
 }
 
 function applyHierarchyPdfSeedSilent() {
@@ -2685,7 +2762,7 @@ async function activateProject(proj, opts) {
     if (!confirm("目前專案有未儲存變更。切換後仍留在本機暫存，但請記得回來按「儲存」。確定切換？")) return;
   }
   if (state.project) {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
+    safePersistCurrentProjectLocal();
   }
   state.project = proj;
   rememberActiveProjectId(proj.id);
@@ -2700,8 +2777,9 @@ async function activateProject(proj, opts) {
     if (raw) {
       const saved = JSON.parse(raw);
       if (saved && (Array.isArray(saved.nodes) || Array.isArray(saved.equipment))) {
-        // 本機若是機電／水電誤資料，略過（含已轉成設備列的情況）
+        // 本機若是其他專案誤資料，略過
         if (shouldForceRecoverProjectPayload(proj, saved)) {
+          try { localStorage.removeItem(STORE_KEY); } catch (e2) {}
           loadedLocal = false;
         } else {
           applyProjectPayload(saved);
@@ -2712,11 +2790,7 @@ async function activateProject(proj, opts) {
   } catch (e) {}
   if (state.project) state.project.arch = "unified";
   if (!loadedLocal) {
-    if (isVivoLineProject(proj)) {
-      applyProjectPayload(vivoEquipmentRecoverPayload(proj));
-    } else {
-      applyProjectPayload(blankProjectPayload(proj.name));
-    }
+    applyProjectPayload(blankPayloadForProject(proj));
   }
   if (state.project) state.project.arch = "unified";
   syncTitleToProject(proj);
@@ -3660,7 +3734,7 @@ async function activateProjectsOverview(opts) {
     if (!confirm("目前專案有未儲存變更。切到總覽後仍留在本機暫存，請記得回來按「儲存」或「全部儲存」。確定切換？")) return;
   }
   if (state.project && !isProjectsOverview()) {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
+    safePersistCurrentProjectLocal();
   }
   state.project = PROJECTS_OVERVIEW;
   rememberActiveProjectId(PROJECTS_OVERVIEW_ID);
@@ -6206,6 +6280,23 @@ async function cloudPush() {
       LineOneDrive.setActiveProject(state.project);
     }
     const name = (state.project && state.project.name) || "目前專案";
+    // 內容與專案不符：先還原，禁止把錯案資料寫進雲端
+    if (state.project && shouldForceRecoverProjectPayload(state.project, {
+      title: DATA.title,
+      source: DATA.source,
+      equipment: DATA.equipment,
+      nodes: DATA.nodes,
+      stages: DATA.stages,
+      segOrder: DATA.segOrder
+    })) {
+      toast("偵測「" + name + "」內容不符，正在還原後再儲存…");
+      await forceRecoverWrongProjectData(state.project);
+      state.dirty = false;
+      hideSyncConflict();
+      updateCloudBar();
+      render();
+      return;
+    }
     toast("正在儲存「" + name + "」…");
     if (isHierarchyArch()) rollupHierarchyPct();
     const payload = cloudPayload();
@@ -6236,8 +6327,8 @@ async function cloudPushAllProjects() {
       await cloudPush();
       return;
     }
-    // 先把目前畫面寫入本機，再逐案上傳
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
+    // 先把目前畫面寫入本機（內容不符則略過），再逐案上傳
+    safePersistCurrentProjectLocal();
     const prev = state.project;
     const btn = document.querySelector("[data-save-all-projects]");
     if (btn) btn.disabled = true;
@@ -6260,12 +6351,19 @@ async function cloudPushAllProjects() {
             try { payload = JSON.parse(raw); } catch (e) { payload = null; }
           }
         }
-        if (!payload || !Array.isArray(payload.equipment)) {
+        if (!payload || (!Array.isArray(payload.equipment) && !Array.isArray(payload.nodes))) {
+          skipped++;
+          continue;
+        }
+        // 禁止把跨案誤植內容寫回雲端
+        if (shouldForceRecoverProjectPayload(proj, payload)) {
+          try { localStorage.removeItem(storeKeyForProject(proj)); } catch (e2) {}
           skipped++;
           continue;
         }
         payload.projectId = proj.id;
         payload.projectName = proj.name;
+        payload.arch = "unified";
         payload.savedAt = new Date().toISOString();
         await LineOneDrive.uploadJson(payload);
         try { localStorage.setItem(storeKeyForProject(proj), JSON.stringify(payload)); } catch (e) {}
