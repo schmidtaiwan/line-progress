@@ -526,31 +526,43 @@
           return ensureProjectsRootId().then(function (rootId) {
             return fetchJsonInFolder(rootId, "projects_index.json").then(function (data) {
               const buildId = String(cfg.forceIndexBuildId || "").trim();
-              const forced = forceIndexHints();
-              const needForce = !!(buildId && forced.length && (!data || data.forceBuildId !== buildId));
-              let hint = (data && Array.isArray(data.projects)) ? data.projects.map(normalizeProjectRecord) : [];
-              if (needForce) {
-                // 只把設定當「名稱／id 提示」對齊現有資料夾；不再把已刪專案幽靈加回
-                const mergedHints = {};
-                hint.concat(forced).forEach(function (p) {
-                  const k = normFolderKey(p.name);
-                  if (!k) return;
-                  mergedHints[k] = Object.assign({}, mergedHints[k] || {}, p);
-                });
-                hint = Object.keys(mergedHints).map(function (k) { return normalizeProjectRecord(mergedHints[k]); });
-                return syncProjectsIndexFromDrive(rootId, hint, { forceBuildId: buildId, seedMissing: false });
+              let list = (data && Array.isArray(data.projects))
+                ? data.projects.map(normalizeProjectRecord).filter(function (p) { return p && p.name; })
+                : [];
+              const hasIndex = list.length > 0;
+
+              // ★ 有清單就以 projects_index 為準，不再每次用資料夾重建
+              // （否則刪案後資料夾若還在／刪不掉，重整一定又變回來）
+              if (hasIndex) {
+                if (buildId && data.forceBuildId !== buildId) {
+                  return putJsonInFolder(rootId, "projects_index.json", {
+                    savedAt: new Date().toISOString(),
+                    forceBuildId: buildId,
+                    projects: list
+                  }).then(function () { return list; });
+                }
+                return list;
               }
-              return syncProjectsIndexFromDrive(rootId, hint, { forceBuildId: buildId }).then(function (fromFolders) {
+
+              // 空清單：才從資料夾／遷移建立
+              const forced = forceIndexHints();
+              return syncProjectsIndexFromDrive(rootId, forced, {
+                forceBuildId: buildId,
+                seedMissing: false
+              }).then(function (fromFolders) {
                 if (fromFolders && fromFolders.length) return fromFolders;
-                return migrateIntoSharedRootIfNeeded(rootId, hint).then(function (migrated) {
-                  return syncProjectsIndexFromDrive(rootId, migrated || hint, { forceBuildId: buildId }).then(function (again) {
+                return migrateIntoSharedRootIfNeeded(rootId, forced).then(function (migrated) {
+                  return syncProjectsIndexFromDrive(rootId, migrated || forced, {
+                    forceBuildId: buildId,
+                    seedMissing: false
+                  }).then(function (again) {
                     if (again && again.length) return again;
-                    const list = defaultProjectsList().map(normalizeProjectRecord);
+                    const fallback = defaultProjectsList().map(normalizeProjectRecord);
                     return putJsonInFolder(rootId, "projects_index.json", {
                       savedAt: new Date().toISOString(),
                       forceBuildId: buildId || undefined,
-                      projects: list
-                    }).then(function () { return list; });
+                      projects: fallback
+                    }).then(function () { return fallback; });
                   });
                 });
               });
@@ -610,45 +622,55 @@
     });
   }
 
-  /** 刪除專案在共用根下的資料夾（含 line_data／photos／history） */
+  function trashOrDeleteDriveId(fileId) {
+    if (!fileId) return Promise.resolve();
+    return withScopeRetry(function () {
+      return driveFetch(
+        "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?supportsAllDrives=true",
+        { method: "DELETE" }
+      ).then(function (res) {
+        if (res.status === 404 || res.ok) return;
+        return driveFetch(
+          "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?supportsAllDrives=true",
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ trashed: true })
+          }
+        ).then(function (r2) {
+          if (r2.status === 404 || r2.ok) return;
+          return r2.text().then(function (t) {
+            throw new Error("刪除雲端資料夾失敗 " + r2.status + " " + t);
+          });
+        });
+      });
+    });
+  }
+
+  /** 刪除專案在共用根下的資料夾（同名／去空白同名全部刪） */
   function deleteProjectFolder(proj) {
     const name = String((proj && proj.name) || "").trim();
     if (!name) return Promise.resolve();
-    const folderName = sanitizeProjectFolderName(name);
+    const want = normFolderKey(name);
+    const key = projCacheKey(proj);
+    if (key) {
+      delete folderIdByProject[key];
+      delete fileIdByProject[key];
+    }
+    if (activeProject && projCacheKey(activeProject) === key) {
+      cachedFolderId = "";
+      state.fileId = "";
+    }
     return ensureProjectsRootId().then(function (rootId) {
-      return findChildFolder(rootId, folderName).then(function (folderId) {
-        if (!folderId) return;
-        const key = projCacheKey(proj);
-        if (key) {
-          delete folderIdByProject[key];
-          delete fileIdByProject[key];
-        }
-        if (activeProject && projCacheKey(activeProject) === key) {
-          cachedFolderId = "";
-          state.fileId = "";
-        }
-        return withScopeRetry(function () {
-          return driveFetch(
-            "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(folderId) + "?supportsAllDrives=true",
-            { method: "DELETE" }
-          ).then(function (res) {
-            if (res.status === 404 || res.ok) return;
-            // 無法永久刪除時改丟進垃圾桶（資料夾內檔案一併處理）
-            return driveFetch(
-              "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(folderId) + "?supportsAllDrives=true",
-              {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ trashed: true })
-              }
-            ).then(function (r2) {
-              if (r2.status === 404 || r2.ok) return;
-              return r2.text().then(function (t) {
-                throw new Error("刪除雲端資料夾失敗 " + r2.status + " " + t);
-              });
-            });
-          });
+      return listChildFolders(rootId, { bypassCache: true }).then(function (folders) {
+        const matches = (folders || []).filter(function (f) {
+          return normFolderKey(f.name) === want;
         });
+        let chain = Promise.resolve();
+        matches.forEach(function (f) {
+          chain = chain.then(function () { return trashOrDeleteDriveId(f.id); });
+        });
+        return chain;
       });
     }).then(function () {
       try {
@@ -678,9 +700,14 @@
         if (normFolderKey(p.name) === normFolderKey(hit.name)) return false;
         return true;
       });
-      // 先刪雲端資料夾，再更新清單（失敗則整筆中止，避免清單沒了資料夾還在）
-      return deleteProjectFolder(hit).then(function () {
-        return saveProjectsIndex(next).then(function () { return next; });
+      // ★ 先寫入較短清單（清單為準），再刪資料夾；資料夾刪失敗不回滾清單
+      return saveProjectsIndex(next).then(function () {
+        return deleteProjectFolder(hit).then(function () {
+          return next;
+        }).catch(function (err) {
+          console.warn("專案資料夾刪除失敗（清單已更新）", err);
+          return next;
+        });
       });
     });
   }

@@ -24,8 +24,8 @@ window.GOOGLE_CONFIG = {
   legacyProjectsRoot: "架線進度專案",
 
   // 一次性：依雲端資料夾重寫 projects_index（寫入後帶 forceBuildId，同 ID 不重跑）
-  // 20261102-del1：修正刪案後因缺 forceBuildId／幽靈 hint 又把專案加回
-  forceIndexBuildId: "20261102-del1",
+  // 20261102-del2：清單以 projects_index 為準，不再每次用資料夾重建（刪案才會留下）
+  forceIndexBuildId: "20261102-del2",
   forceIndexProjects: [
     { id: "p-dip-auto", name: "DIP自動換線", arch: "unified" },
     { id: "p-r01-mep", name: "R01機電工程", arch: "unified" },
