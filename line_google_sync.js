@@ -23,6 +23,9 @@
   let presenceTimer = null;
   let presenceBusy = false;
   let onViewersChange = null;
+  /** 本頁面只強制 consent 一次，避免「未驗證應用」警告一直跳 */
+  let scopeConsentAsked = false;
+  let scopeRetryInFlight = null;
   const PRESENCE_TTL_MS = 45000;
   const PRESENCE_INTERVAL_MS = 12000;
   const PRESENCE_PREFIX = "vivo_r01_view_";
@@ -566,15 +569,15 @@
     sheetsMigrateBusy[key] = true;
     const proj = activeProject;
     const body = payload;
+    // 背景遷移：不要 withScopeRetry／consent，避免邊用邊跳授權窗
     Promise.resolve()
       .then(function () {
-        return withScopeRetry(function () {
-          return ensureProjectSpreadsheetId(proj).then(function (sid) {
-            return writePayloadToSheets(sid, body).then(function () {
-              rememberSpreadsheetId(sid);
-              if (proj) proj.spreadsheetId = sid;
-              return persistSpreadsheetIdToIndex(proj);
-            });
+        if (!state.token) return;
+        return ensureProjectSpreadsheetId(proj).then(function (sid) {
+          return writePayloadToSheets(sid, body).then(function () {
+            rememberSpreadsheetId(sid);
+            if (proj) proj.spreadsheetId = sid;
+            return persistSpreadsheetIdToIndex(proj);
           });
         });
       })
@@ -986,7 +989,7 @@
   function readProjectsIndexRaw() {
     return ensureInit()
       .then(function () {
-        if (!state.account) return login({ prompt: "consent" });
+        if (!state.account) return login();
       })
       .then(function () {
         return withScopeRetry(function () {
@@ -1134,7 +1137,7 @@
   function loadProjectsIndex() {
     return ensureInit()
       .then(function () {
-        if (!state.account) return login({ prompt: "consent" });
+        if (!state.account) return login();
       })
       .then(function () {
         return withScopeRetry(function () {
@@ -1508,7 +1511,7 @@
 
   /**
    * opts.switchAccount = true → 重新登入／換帳（會跳出選帳戶）
-   * 預設只補授權，不強制選帳戶（給首次登入或內部呼叫）
+   * 預設不強制 consent（有 token 就靜默續用）；缺 scope 時才由 withScopeRetry 要一次
    */
   function login(opts) {
     opts = opts || {};
@@ -1518,10 +1521,12 @@
     if (switchAccount) {
       clearAllProjectCaches();
       activeProject = null;
+      scopeConsentAsked = false;
     }
-    const prompt = switchAccount
-      ? "select_account consent"
-      : (opts.prompt != null ? opts.prompt : "consent");
+    // 不要預設 consent：會一直跳出「這個應用程式未經 Google 驗證」
+    let prompt = "";
+    if (switchAccount) prompt = "select_account";
+    else if (opts.prompt != null) prompt = opts.prompt;
     const hint = switchAccount ? "" : (opts.hint || accountHint());
     return requestToken(prompt, hint).then(function (tok) {
       return fetchUserEmail(tok).then(function (acc) {
@@ -2154,21 +2159,26 @@
     return chain;
   }
 
+  /** 僅 OAuth scope 不足才重授權；Sheets API 未開／一般 403 不要當 scope（否則一直跳未驗證警告） */
   function isScopeError(text) {
-    return /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions|insufficient authentication scopes|insufficientFilePermissions|寫入專案清單失敗 403|建立專案清單失敗 403|建立資料夾失敗 403|建立試算表失敗 403|讀取試算表失敗 403|寫入試算表失敗 403|Google Sheets API has not been used|ACCESS_TOKEN_SCOPE/i.test(text || "");
+    return /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes|Request had insufficient authentication scopes|accessNotConfigured.*scope|invalid_scope/i.test(text || "");
   }
 
   function withScopeRetry(fn) {
     return fn().catch(function (err) {
       const msg = String(err && err.message || err);
-      // 403：多半是舊 token 只有 drive.file，對既有資料夾無法寫入 → 強制重新同意完整 drive
-      if (!isScopeError(msg) && !/\b403\b/.test(msg)) throw err;
+      if (!isScopeError(msg)) throw err;
+      // 本頁只問一次 consent，避免未驗證應用警告循環
+      if (scopeConsentAsked) throw err;
+      if (scopeRetryInFlight) {
+        return scopeRetryInFlight.then(function () { return fn(); });
+      }
+      scopeConsentAsked = true;
       state.token = "";
-      return requestToken("consent", accountHint()).then(function () {
-        return fetchUserEmail(state.token);
-      }).then(function () {
-        return fn();
-      });
+      scopeRetryInFlight = requestToken("consent", accountHint())
+        .then(function () { return fetchUserEmail(state.token); })
+        .finally(function () { scopeRetryInFlight = null; });
+      return scopeRetryInFlight.then(function () { return fn(); });
     });
   }
 
@@ -2202,7 +2212,7 @@
     return ensureInit()
       .then(function () {
         // 未登入才登入；不要用 switchAccount，避免載入時又跳選帳戶
-        if (!state.account) return login({ prompt: "consent" });
+        if (!state.account) return login();
       })
       .then(function () {
         return withScopeRetry(function () {
@@ -2548,7 +2558,7 @@
     state.busy = true;
     return ensureInit()
       .then(function () {
-        if (!state.account) return login({ prompt: "consent" });
+        if (!state.account) return login();
       })
       .then(function () {
         return withScopeRetry(function () {
@@ -2597,7 +2607,7 @@
       const buildId = String(cfg.forceIndexBuildId || "").trim();
       return ensureInit()
         .then(function () {
-          if (!state.account) return login({ prompt: "consent" });
+          if (!state.account) return login();
         })
         .then(function () {
           return withScopeRetry(function () {
