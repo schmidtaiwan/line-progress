@@ -1517,52 +1517,34 @@
   }
   .np-actions button.primary { background: #1d4f91; color: #fff; border-color: #1d4f91; }
 
-  .project-rail .btn-add-proj,
-  .project-rail .btn-save-all-proj {
-    width: 100%;
-    border: 1px dashed #7a8a99;
-    background: transparent;
-    border-radius: 10px;
-    padding: 9px 10px;
-    cursor: pointer;
-    font: inherit;
-    font-size: 13px;
-    color: #16324a;
-  }
-  .project-rail .btn-add-proj:hover { background: #e7f0f7; }
-  .project-rail .btn-save-all-proj {
-    border-style: solid;
-    border-color: #1d4f91;
-    background: #1d4f91;
-    color: #fff;
-    margin-top: 4px;
-  }
-  .project-rail .btn-save-all-proj:hover { background: #163a6b; }
-  .project-rail .btn-save-all-proj:disabled { opacity: 0.55; cursor: wait; }
-  .project-rail .btn-add-proj.danger-rail {
-    color: #b91c1c; border-color: #fecaca; background: #fff1f2;
-  }
-  .project-rail .btn-add-proj.danger-rail:hover { background: #ffe4e6; }
-  .project-rail .rail-cloud {
+  .project-rail .rail-actions {
     display: flex; flex-direction: column; gap: 4px;
     margin: 8px 0 6px; padding-top: 8px; border-top: 1px dashed var(--line);
   }
+  .project-rail .rail-cloud {
+    display: flex; flex-direction: column; gap: 4px;
+    margin-top: 4px; padding-top: 4px; border-top: 1px dashed #e2e8f0;
+  }
   .project-rail .rail-icon-btn {
-    display: inline-flex; align-items: center; gap: 0;
-    width: max-content; max-width: 100%;
+    display: inline-flex; align-items: center; justify-content: flex-start;
+    box-sizing: border-box;
+    width: 36px; height: 36px; min-width: 36px; max-width: 100%;
     border: 1px solid #cbd5e1; background: #fff; color: #16324a;
-    border-radius: 10px; padding: 7px 9px; cursor: pointer;
+    border-radius: 10px; padding: 0 9px; cursor: pointer;
     font: inherit; font-size: 13px; font-weight: 650;
     overflow: hidden; white-space: nowrap;
-    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+    transition: width 0.18s ease, background 0.15s, border-color 0.15s, color 0.15s;
   }
-  .project-rail .rail-icon-btn .ico { flex: 0 0 auto; line-height: 1; font-size: 15px; }
+  .project-rail .rail-icon-btn .ico {
+    flex: 0 0 18px; width: 18px; text-align: center; line-height: 1; font-size: 15px;
+  }
   .project-rail .rail-icon-btn .lbl {
     display: inline-block; max-width: 0; opacity: 0; overflow: hidden;
     margin-left: 0; transition: max-width 0.18s ease, opacity 0.15s ease, margin-left 0.15s ease;
   }
   .project-rail .rail-icon-btn:hover,
   .project-rail .rail-icon-btn:focus-visible {
+    width: auto; min-width: 36px;
     background: #e7f0f7; border-color: #2b6cb0; outline: none;
   }
   .project-rail .rail-icon-btn:hover .lbl,
@@ -1573,8 +1555,20 @@
     cursor: default; color: var(--muted); font-weight: 600;
   }
   .project-rail .rail-icon-btn.viewer:hover { background: #f8fafc; border-color: #cbd5e1; }
+  .project-rail .rail-icon-btn.danger {
+    color: #b91c1c; border-color: #fecaca; background: #fff1f2;
+  }
   .project-rail .rail-icon-btn.danger:hover {
-    background: #fff1f2; border-color: #fda4af; color: #b91c1c;
+    background: #ffe4e6; border-color: #fda4af; color: #b91c1c;
+  }
+  .project-rail .rail-icon-btn.primary {
+    border-color: #1d4f91; background: #1d4f91; color: #fff;
+  }
+  .project-rail .rail-icon-btn.primary:hover {
+    background: #163a6b; border-color: #163a6b; color: #fff;
+  }
+  .project-rail .rail-icon-btn:disabled {
+    opacity: 0.55; cursor: wait;
   }
   .cloud-bar .btn-cloud[data-cloud-push] { margin-left: auto; }
   .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -1602,12 +1596,14 @@
   <h2 class="rail-title">專案</h2>
   <p class="rail-hint">點選切換；按住拖曳可排序；右鍵可複製／刪除／貼上</p>
   <div class="proj-list" id="projectList"></div>
-  <div class="rail-cloud" id="railCloud" aria-label="雲端操作"></div>
-  <button type="button" class="btn-add-proj" data-add-project title="新增專案">＋ 新增專案</button>
-  <button type="button" class="btn-add-proj" data-copy-project title="複製目前專案到剪貼簿">複製專案</button>
-  <button type="button" class="btn-add-proj" data-paste-project title="將已複製專案貼上為新專案">貼上專案</button>
-  <button type="button" class="btn-add-proj danger-rail" data-delete-project title="刪除目前專案（清單＋雲端資料夾）">刪除專案</button>
-  <button type="button" class="btn-save-all-proj" data-save-all-projects title="將所有專案的本機進度寫入各自雲端資料夾">全部儲存</button>
+  <div class="rail-actions" id="railActions" aria-label="專案與雲端操作">
+    <button type="button" class="rail-icon-btn" data-add-project title="新增專案"><span class="ico">＋</span><span class="lbl">新增專案</span></button>
+    <button type="button" class="rail-icon-btn" data-copy-project title="複製目前專案到剪貼簿"><span class="ico">📋</span><span class="lbl">複製專案</span></button>
+    <button type="button" class="rail-icon-btn" data-paste-project title="將已複製專案貼上為新專案"><span class="ico">📄</span><span class="lbl">貼上專案</span></button>
+    <button type="button" class="rail-icon-btn danger" data-delete-project title="刪除目前專案（清單＋雲端資料夾）"><span class="ico">🗑</span><span class="lbl">刪除專案</span></button>
+    <button type="button" class="rail-icon-btn primary" data-save-all-projects title="將所有專案的本機進度寫入各自雲端資料夾"><span class="ico">💾</span><span class="lbl">全部儲存</span></button>
+    <div class="rail-cloud" id="railCloud" aria-label="雲端操作"></div>
+  </div>
 </aside>
 <div class="app-main">
 <header class="top">
@@ -1721,7 +1717,7 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=88"></script>
+<script src="google_config.js?v=89"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
@@ -1748,7 +1744,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 88;
+const PAGE_BUILD = 89;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
