@@ -342,63 +342,95 @@
     });
   }
 
+  /** 同一試算表的分頁建立串行，避免並行 rename/addSheet 撞名 */
+  const sheetTabsLocks = Object.create(null);
+
+  function sheetTitleKey(name) {
+    return String(name || "").trim().toLowerCase();
+  }
+
   function ensureSheetTabs(spreadsheetId, wantedNames) {
-    return sheetsFetch(
-      "https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(spreadsheetId) +
-      "?fields=sheets.properties"
-    ).then(function (res) {
-      if (!res.ok) {
-        return res.text().then(function (t) {
-          throw new Error("讀取試算表分頁失敗 " + res.status + " " + t);
-        });
-      }
-      return res.json();
-    }).then(function (meta) {
-      const existing = {};
-      ((meta && meta.sheets) || []).forEach(function (s) {
-        const n = s.properties && s.properties.title;
-        if (n) existing[n] = s.properties.sheetId;
-      });
-      const requests = [];
-      const wanted = wantedNames || [];
-      // 若只有預設 Sheet1／工作表1，先改名成第一個需要的分頁
-      const defaultNames = Object.keys(existing).filter(function (n) {
-        return /^工作表\d+$/i.test(n) || /^Sheet\d+$/i.test(n);
-      });
-      if (wanted.length && defaultNames.length && !existing[wanted[0]]) {
-        const dn = defaultNames[0];
-        requests.push({
-          updateSheetProperties: {
-            properties: { sheetId: existing[dn], title: wanted[0] },
-            fields: "title"
-          }
-        });
-        existing[wanted[0]] = existing[dn];
-        delete existing[dn];
-      }
-      wanted.forEach(function (name) {
-        if (!existing[name]) {
-          requests.push({ addSheet: { properties: { title: name } } });
-        }
-      });
-      if (!requests.length) return spreadsheetId;
+    const sid = String(spreadsheetId || "");
+    if (!sid) return Promise.reject(new Error("缺少 spreadsheetId"));
+    const prev = sheetTabsLocks[sid] || Promise.resolve();
+    const run = prev.catch(function () {}).then(function () {
       return sheetsFetch(
-        "https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(spreadsheetId) +
-        ":batchUpdate",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ requests: requests })
-        }
+        "https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(sid) +
+        "?fields=sheets.properties"
       ).then(function (res) {
         if (!res.ok) {
           return res.text().then(function (t) {
-            throw new Error("建立工作表分頁失敗 " + res.status + " " + t);
+            throw new Error("讀取試算表分頁失敗 " + res.status + " " + t);
           });
         }
-        return spreadsheetId;
+        return res.json();
+      }).then(function (meta) {
+        const byKey = Object.create(null);
+        ((meta && meta.sheets) || []).forEach(function (s) {
+          const n = s.properties && s.properties.title;
+          if (!n) return;
+          byKey[sheetTitleKey(n)] = {
+            title: n,
+            sheetId: s.properties.sheetId
+          };
+        });
+        const requests = [];
+        const wanted = (wantedNames || []).map(function (n) { return String(n || "").trim(); }).filter(Boolean);
+        const pendingKeys = Object.create(null);
+
+        function hasTitle(name) {
+          const k = sheetTitleKey(name);
+          return !!(byKey[k] || pendingKeys[k]);
+        }
+        function markPending(name) {
+          pendingKeys[sheetTitleKey(name)] = true;
+        }
+
+        // 預設 Sheet1／工作表1 → 改名成第一個尚不存在的目標名
+        const defaultEntry = Object.keys(byKey).map(function (k) { return byKey[k]; }).find(function (e) {
+          return /^工作表\d+$/i.test(e.title) || /^Sheet\d+$/i.test(e.title);
+        });
+        if (defaultEntry && wanted.length && !hasTitle(wanted[0])) {
+          requests.push({
+            updateSheetProperties: {
+              properties: { sheetId: defaultEntry.sheetId, title: wanted[0] },
+              fields: "title"
+            }
+          });
+          markPending(wanted[0]);
+          delete byKey[sheetTitleKey(defaultEntry.title)];
+          byKey[sheetTitleKey(wanted[0])] = { title: wanted[0], sheetId: defaultEntry.sheetId };
+        }
+
+        wanted.forEach(function (name) {
+          if (hasTitle(name)) return;
+          requests.push({ addSheet: { properties: { title: name } } });
+          markPending(name);
+        });
+
+        if (!requests.length) return sid;
+        return sheetsFetch(
+          "https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(sid) +
+          ":batchUpdate",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ requests: requests })
+          }
+        ).then(function (res) {
+          if (res.ok) return sid;
+          return res.text().then(function (t) {
+            // 已有同名分頁＝可視為成功（競態／重試）
+            if (res.status === 400 && /已有工作表使用|already exists|duplicate/i.test(t)) {
+              return sid;
+            }
+            throw new Error("建立工作表分頁失敗 " + res.status + " " + t);
+          });
+        });
       });
     });
+    sheetTabsLocks[sid] = run.then(function () {}, function () {});
+    return run;
   }
 
   function findSpreadsheetInFolder(folderId, title) {
