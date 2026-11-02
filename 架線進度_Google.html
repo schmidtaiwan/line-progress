@@ -1482,25 +1482,9 @@
 <div class="np-mask" id="newProjectModal" role="dialog" aria-modal="true" aria-label="新增專案">
   <div class="np-card">
     <h3>新增專案</h3>
-    <p class="np-hint">雲端會依專案名稱建立資料夾。請選擇架構（建立後以資料為準，可在設定調整內容）。</p>
+    <p class="np-hint">雲端會依專案名稱建立資料夾。設備清單與層級樹共用同一套顯示／設定，可於設定補階段、時程與結構。</p>
     <label class="np-field" for="npName">專案名稱</label>
     <input type="text" id="npName" placeholder="例如：R01水電工程" autocomplete="off">
-    <div class="np-arch">
-      <label>
-        <input type="radio" name="npArch" value="equipment" checked>
-        <div>
-          <div class="ttl">設備進度架構</div>
-          <div class="desc">製程段 × 設備 × 五階段（既有架線進度）</div>
-        </div>
-      </label>
-      <label>
-        <input type="radio" name="npArch" value="hierarchy">
-        <div>
-          <div class="ttl">層級專案架構</div>
-          <div class="desc">第1層專案／第2層階段／第3層工作項（進度表 WBS）</div>
-        </div>
-      </label>
-    </div>
     <div class="np-actions">
       <button type="button" data-np-cancel>取消</button>
       <button type="button" class="primary" data-np-ok>建立</button>
@@ -1582,7 +1566,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 57;
+const PAGE_BUILD = 58;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -2047,8 +2031,9 @@ function loadData() {
   }
 }
 function cloudPayload() {
+  refreshUnifiedNodes();
   return {
-    arch: projectArchOf(DATA),
+    arch: "unified",
     source: DATA.source,
     title: DATA.title,
     subtitle: DATA.subtitle,
@@ -2122,7 +2107,7 @@ function resetWorkspaceForAccountSwitch() {
   state.stage = 0;
   state.weeklyPanel = "gantt";
   state.tab = "weekly";
-  applyProjectPayload(blankProjectPayload("（請選擇專案）", "equipment"));
+  applyProjectPayload(blankProjectPayload("（請選擇專案）"));
   DATA.title = "架線進度";
   DATA.subtitle = "已切換帳號，正在載入此帳號的專案…";
   STORE_KEY = "vivo_line_dash_" + accountScopeKey() + "_pending_" + (BASE.source || "default");
@@ -2130,110 +2115,214 @@ function resetWorkspaceForAccountSwitch() {
 
 function applyProjectPayload(saved) {
   if (!saved) return false;
-  const arch = projectArchOf(saved);
-  DATA.arch = arch;
-  if (arch === "hierarchy") {
-    DATA.nodes = clone(Array.isArray(saved.nodes) ? saved.nodes : []);
-    DATA.equipment = Array.isArray(saved.equipment) ? clone(saved.equipment) : [];
-    DATA.milestones = Array.isArray(saved.milestones) ? clone(saved.milestones) : [];
-    DATA.stages = Array.isArray(saved.stages) ? clone(saved.stages) : [];
-    DATA.segOrder = Array.isArray(saved.segOrder) ? clone(saved.segOrder) : [];
-    if (saved.title) DATA.title = saved.title;
-    if (saved.subtitle) DATA.subtitle = saved.subtitle;
-    if (saved.source) DATA.source = saved.source;
-    ensureHierarchyNodes();
-    rollupHierarchyPct();
-    state.weeklyPanel = "gantt";
-    state.openRemark = null;
-    state.openDates = null;
-    return true;
-  }
-  if (!Array.isArray(saved.equipment)) return false;
-  DATA.nodes = Array.isArray(saved.nodes) ? clone(saved.nodes) : [];
-  DATA.equipment = clone(saved.equipment);
-  if (Array.isArray(saved.milestones)) DATA.milestones = clone(saved.milestones);
-  if (Array.isArray(saved.stages) && saved.stages.length) DATA.stages = clone(saved.stages);
-  if (Array.isArray(saved.segOrder) && saved.segOrder.length) DATA.segOrder = clone(saved.segOrder);
+  const hasEqArr = Array.isArray(saved.equipment);
+  const hasNodesArr = Array.isArray(saved.nodes);
+  if (!hasEqArr && !hasNodesArr) return false;
+
+  DATA.equipment = hasEqArr ? clone(saved.equipment) : [];
+  DATA.nodes = hasNodesArr ? clone(saved.nodes) : [];
+  DATA.milestones = Array.isArray(saved.milestones) ? clone(saved.milestones) : [];
+  if (Array.isArray(saved.stages)) DATA.stages = clone(saved.stages);
+  if (Array.isArray(saved.segOrder)) DATA.segOrder = clone(saved.segOrder);
   if (saved.title) DATA.title = saved.title;
   if (saved.subtitle) DATA.subtitle = saved.subtitle;
   if (saved.source) DATA.source = saved.source;
-  normalizeStructure();
-  state.eq = Math.min(state.eq, Math.max(0, DATA.equipment.length - 1));
+
+  if (DATA.equipment.length) {
+    normalizeStructure();
+    const hasMapped = (DATA.nodes || []).some(n => n && (n.kind === "unit" || (n.kind === "task" && n.stageKey)));
+    if (!hasMapped) DATA.nodes = equipmentToNodes(DATA);
+    else annotateNodeKinds(DATA.nodes);
+  } else {
+    annotateNodeKinds(DATA.nodes);
+    ensureHierarchyNodes();
+    rollupHierarchyPct();
+  }
+  DATA.arch = "unified";
+  state.eq = Math.min(state.eq, Math.max(0, Math.max(0, (DATA.equipment || []).length - 1)));
   state.weeklyPanel = "gantt";
   state.openRemark = null;
   state.openDates = null;
+  state.openHierRemark = null;
   return true;
 }
 
-function blankHierarchyPayload(name) {
+
+/** —— 統一專案模型（設備／層級共用）—— */
+function usesChecklistViews(obj) {
+  const d = obj || DATA;
+  return Array.isArray(d.equipment) && d.equipment.length > 0
+    && Array.isArray(d.stages) && d.stages.length > 0;
+}
+
+function hasUnitNodes(obj) {
+  const nodes = (obj || DATA).nodes || [];
+  return nodes.some(n => n && n.kind === "unit");
+}
+
+function nodeKindSlug(s) {
+  return String(s || "").replace(/\s+/g, "_").replace(/[^\w\u4e00-\u9fff\-]+/g, "").slice(0, 24) || "x";
+}
+
+function annotateNodeKinds(nodes) {
+  (nodes || []).forEach(n => {
+    if (!n || n.kind) return;
+    const lv = Math.min(3, Math.max(1, Number(n.level) || 1));
+    n.level = lv;
+    if (lv === 1) n.kind = "group";
+    else if (lv === 2) n.kind = "group";
+    else n.kind = "task";
+  });
+  return nodes || [];
+}
+
+/** 設備 checklist → 樹節點（製程段=group、設備=unit、細項=task+stageKey） */
+function equipmentToNodes(data) {
+  const d = data || DATA;
+  const stages = Array.isArray(d.stages) ? d.stages : [];
+  const segs = Array.isArray(d.segOrder) && d.segOrder.length
+    ? d.segOrder.slice()
+    : Array.from(new Set((d.equipment || []).map(eq => eq && eq.seg).filter(Boolean)));
+  const nodes = [];
+  const segIds = {};
+  segs.forEach(function (seg, i) {
+    const id = "g_" + i + "_" + nodeKindSlug(seg);
+    segIds[seg] = id;
+    const mile = (d.milestones || []).find(m => m && m.seg === seg) || {};
+    nodes.push({
+      id: id,
+      parentId: "",
+      level: 1,
+      kind: "group",
+      name: seg,
+      days: 0,
+      pct: 0,
+      start: (mile.starts && mile.starts[0]) || "",
+      finish: (mile.dates && mile.dates[0]) || "",
+      note: "",
+      photos: []
+    });
+  });
+  (d.equipment || []).forEach(function (eq, ei) {
+    if (!eq) return;
+    const pid = segIds[eq.seg] || "";
+    const uid = "u_" + ei + "_" + nodeKindSlug(eq.name || eq.idx || ei);
+    let unitPct = 0;
+    let unitN = 0;
+    nodes.push({
+      id: uid,
+      parentId: pid,
+      level: 2,
+      kind: "unit",
+      name: eq.name || ("設備" + (ei + 1)),
+      idx: eq.idx || String(ei + 1),
+      qty: eq.qty || "",
+      pm: eq.pm || "",
+      owner: eq.owner || "",
+      seg: eq.seg || "",
+      days: 0,
+      pct: 0,
+      start: "",
+      finish: "",
+      note: "",
+      photos: []
+    });
+    (eq.stages || []).forEach(function (st, si) {
+      const sk = (stages[si] && (stages[si].key || stages[si].mark || stages[si].name)) || ("s" + si);
+      (st && st.items ? st.items : []).forEach(function (it, ii) {
+        if (!it) return;
+        const rawPct = Number(it.pct);
+        const pct = Number.isFinite(rawPct) ? (rawPct > 1 ? rawPct / 100 : rawPct) : 0;
+        unitPct += pct;
+        unitN += 1;
+        nodes.push({
+          id: "t_" + ei + "_" + si + "_" + ii,
+          parentId: uid,
+          level: 3,
+          kind: "task",
+          stageKey: String(sk),
+          stageIndex: si,
+          name: it.item || ("項目" + (ii + 1)),
+          days: 0,
+          pct: pct,
+          urg: it.urg || "中",
+          start: it.start || "",
+          finish: it.due || "",
+          due: it.due || "",
+          actual: it.actual || "",
+          status: it.status || "未開始",
+          note: it.note || "",
+          photos: Array.isArray(it.photos) ? it.photos : []
+        });
+      });
+    });
+    const unit = nodes.find(n => n.id === uid);
+    if (unit && unitN) unit.pct = unitPct / unitN;
+  });
+  return nodes;
+}
+
+function refreshUnifiedNodes() {
+  if (!Array.isArray(DATA.nodes)) DATA.nodes = [];
+  if (usesChecklistViews(DATA)) {
+    DATA.nodes = equipmentToNodes(DATA);
+  } else {
+    annotateNodeKinds(DATA.nodes);
+  }
+}
+
+function blankProjectPayload(name) {
   const label = String(name || "新專案").trim() || "新專案";
   const id1 = "n1";
   const id2 = "n2";
   const id3 = "n3";
+  const d = clone(BASE);
   return {
-    arch: "hierarchy",
+    arch: "unified",
     source: "",
-    title: label + "｜層級進度",
-    subtitle: "層級專案架構：第1層專案／第2層階段／第3層工作項",
+    title: label + "｜進度",
+    subtitle: "共用架構：設定可維護階段、時程與結構（樹狀／設備）",
     savedAt: new Date().toISOString(),
     equipment: [],
     milestones: [],
-    stages: [],
+    stages: clone(d.stages || []),
     segOrder: [],
     nodes: [
-      { id: id1, parentId: "", level: 1, name: label, days: 0, pct: 0, start: "", finish: "", note: "", photos: [] },
-      { id: id2, parentId: id1, level: 2, name: "階段一", days: 0, pct: 0, start: "", finish: "", note: "", photos: [] },
-      { id: id3, parentId: id2, level: 3, name: "工作項 1", days: 0, pct: 0, start: "", finish: "", note: "", photos: [] }
+      { id: id1, parentId: "", level: 1, kind: "group", name: label, days: 0, pct: 0, start: "", finish: "", note: "", photos: [] },
+      { id: id2, parentId: id1, level: 2, kind: "group", name: "階段一", days: 0, pct: 0, start: "", finish: "", note: "", photos: [] },
+      { id: id3, parentId: id2, level: 3, kind: "task", name: "工作項 1", days: 0, pct: 0, start: "", finish: "", note: "", photos: [], status: "未開始", urg: "中" }
     ]
   };
 }
 
-function blankProjectPayload(name, arch) {
-  const kind = (arch === "hierarchy") ? "hierarchy" : "equipment";
-  if (kind === "hierarchy") return blankHierarchyPayload(name);
-  const d = clone(BASE);
-  d.title = String(name || "新專案") + "｜架線進度";
-  d.subtitle = "新專案（可於設定維護設備與階段）";
-  d.equipment = [];
-  d.milestones = (d.segOrder || []).map(seg => ({
-    seg,
-    dates: (d.stages || []).map(() => ""),
-    starts: (d.stages || []).map(() => "")
-  }));
-  return {
-    arch: "equipment",
-    source: d.source,
-    title: d.title,
-    subtitle: d.subtitle,
-    savedAt: new Date().toISOString(),
-    equipment: d.equipment,
-    milestones: d.milestones,
-    stages: d.stages,
-    segOrder: d.segOrder,
-    nodes: []
-  };
+function blankHierarchyPayload(name) {
+  // 相容舊呼叫：改走統一空白專案
+  return blankProjectPayload(name);
 }
 
 function projectArchOf(obj) {
-  const a = (obj && obj.arch) || (obj && obj.project && obj.project.arch) || "";
-  if (a === "hierarchy") return "hierarchy";
-  if (Array.isArray(obj && obj.nodes) && obj.nodes.length && !(obj.equipment && obj.equipment.length)) {
-    return "hierarchy";
-  }
+  const d = obj || {};
+  // 舊欄位仍可讀；unified 依內容推斷給相容路徑用
+  if (d.arch === "hierarchy") return "hierarchy";
+  if (d.arch === "equipment") return "equipment";
+  if (usesChecklistViews(d)) return "equipment";
+  if (Array.isArray(d.nodes) && d.nodes.length && !(d.equipment && d.equipment.length)) return "hierarchy";
+  if (Array.isArray(d.equipment) && d.equipment.length) return "equipment";
+  if (Array.isArray(d.nodes) && d.nodes.length) return "hierarchy";
   return "equipment";
 }
 
+/** 樹狀清單模式（無設備 checklist 時） */
 function isHierarchyArch() {
   if (isProjectsOverview()) return false;
-  if (state.project && state.project.arch === "hierarchy") return true;
-  return projectArchOf(DATA) === "hierarchy";
+  return !usesChecklistViews(DATA);
 }
+
 
 function ensureHierarchyNodes() {
   if (!Array.isArray(DATA.nodes)) DATA.nodes = [];
-  DATA.arch = "hierarchy";
   if (!DATA.nodes.length) {
-    const blank = blankHierarchyPayload((state.project && state.project.name) || "新專案");
+    const blank = blankProjectPayload((state.project && state.project.name) || "新專案");
     DATA.nodes = blank.nodes;
   }
   DATA.nodes.forEach((n, i) => {
@@ -2247,6 +2336,10 @@ function ensureHierarchyNodes() {
     n.finish = n.finish || "";
     n.note = n.note || "";
     if (!Array.isArray(n.photos)) n.photos = [];
+    if (!n.kind) {
+      if (n.level === 1 || n.level === 2) n.kind = "group";
+      else n.kind = "task";
+    }
   });
 }
 
@@ -2339,11 +2432,7 @@ function renderProjectRail() {
   }
   html += list.map(p => {
     const on = p.id === curId ? "on" : "";
-    const arch = p.arch === "hierarchy" ? "hierarchy" : "equipment";
-    const tag = arch === "hierarchy"
-      ? '<span class="arch-tag hi">層級</span>'
-      : '<span class="arch-tag eq">設備</span>';
-    return `<button type="button" class="proj-btn ${on}" data-project-id="${escapeAttr(p.id)}" title="${escapeAttr((p.folderPath || p.name) + "｜" + (arch === "hierarchy" ? "層級架構" : "設備架構"))}">${escapeHtml(p.name)}${tag}</button>`;
+    return `<button type="button" class="proj-btn ${on}" data-project-id="${escapeAttr(p.id)}" title="${escapeAttr(p.folderPath || p.name)}">${escapeHtml(p.name)}</button>`;
   }).join("");
   host.innerHTML = html;
 }
@@ -2400,15 +2489,14 @@ function titleBelongsToProject(title, projName) {
 function syncTitleToProject(proj) {
   if (!proj || !proj.name) return;
   if (titleBelongsToProject(DATA.title, proj.name)) return;
-  const hier = (proj.arch === "hierarchy") || projectArchOf(DATA) === "hierarchy";
-  DATA.title = proj.name + (hier ? "｜層級進度" : "｜架線進度");
+  DATA.title = proj.name + "｜進度";
 }
 
 function isBlankHierarchyTemplate() {
-  if (projectArchOf(DATA) !== "hierarchy") return false;
+  if (usesChecklistViews(DATA)) return false;
   const nodes = DATA.nodes || [];
   if (!nodes.length || nodes.length > 5) return false;
-  return nodes.some(n => n.name === "階段一" || n.name === "工作項 A");
+  return nodes.some(n => n.name === "階段一" || n.name === "工作項 A" || n.name === "工作項 1");
 }
 
 function applyHierarchyPdfSeedSilent() {
@@ -2416,12 +2504,12 @@ function applyHierarchyPdfSeedSilent() {
   if (!saved || !Array.isArray(saved.nodes)) return false;
   const name = (state.project && state.project.name) || "R02水電工程";
   applyProjectPayload(Object.assign({}, saved, {
-    title: name + "｜層級進度",
+    title: name + "｜進度",
     projectName: name,
-    arch: "hierarchy",
+    arch: "unified",
     savedAt: new Date().toISOString()
   }));
-  if (state.project) state.project.arch = "hierarchy";
+  if (state.project) state.project.arch = "unified";
   return true;
 }
 
@@ -2447,18 +2535,17 @@ async function activateProject(proj, opts) {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
       const saved = JSON.parse(raw);
-      if (saved && (projectArchOf(saved) === "hierarchy" || Array.isArray(saved.equipment))) {
+      if (saved && (Array.isArray(saved.nodes) || Array.isArray(saved.equipment))) {
         applyProjectPayload(saved);
         loadedLocal = true;
       }
     }
   } catch (e) {}
-  const archHint = opts.arch || (proj && proj.arch) || "equipment";
-  if (state.project) state.project.arch = archHint;
+  if (state.project) state.project.arch = "unified";
   if (!loadedLocal) {
-    applyProjectPayload(blankProjectPayload(proj.name, archHint));
+    applyProjectPayload(blankProjectPayload(proj.name));
   }
-  if (state.project) state.project.arch = projectArchOf(DATA);
+  if (state.project) state.project.arch = "unified";
   syncTitleToProject(proj);
   // 先立刻換畫面（本機），雲端在背景同步 → 切換體感接近瞬間
   const loadGen = (state.projectLoadGen = (state.projectLoadGen || 0) + 1);
@@ -2472,11 +2559,11 @@ async function activateProject(proj, opts) {
       if (loadGen !== state.projectLoadGen || !state.project || state.project.id !== switchedToId) {
         return; // 使用者已又切到別案，丟棄過期結果
       }
-      const hasHier = cloud && projectArchOf(cloud) === "hierarchy" && Array.isArray(cloud.nodes);
+      const hasHier = cloud && Array.isArray(cloud.nodes) && cloud.nodes.length;
       const hasEq = cloud && Array.isArray(cloud.equipment) && cloud.equipment.length;
       if (hasHier || hasEq || (cloud && Array.isArray(cloud.equipment))) {
         applyProjectPayload(cloud);
-        if (state.project) state.project.arch = projectArchOf(DATA);
+        if (state.project) state.project.arch = "unified";
         // 空白層級範本（階段一／工作項 A）自動套用 PDF 水電進度表
         if (isBlankHierarchyTemplate() && applyHierarchyPdfSeedSilent()) {
           syncTitleToProject(proj);
@@ -2496,13 +2583,13 @@ async function activateProject(proj, opts) {
           }
         }
       } else if (opts.resetToBlank || !loadedLocal) {
-        const wantMepSeed = archHint === "hierarchy" && /水電|R02/i.test(String(proj.name || ""));
+        const wantMepSeed = /水電|R02/i.test(String(proj.name || ""));
         if (wantMepSeed && applyHierarchyPdfSeedSilent()) {
-          // 水電／R02 層級專案新建時帶入 PDF 種子
+          // 水電／R02 新建時帶入 PDF 種子
         } else {
-          applyProjectPayload(blankProjectPayload(proj.name, archHint));
+          applyProjectPayload(blankProjectPayload(proj.name));
         }
-        if (state.project) state.project.arch = projectArchOf(DATA) || archHint;
+        if (state.project) state.project.arch = "unified";
         syncTitleToProject(proj);
         await LineOneDrive.uploadJson(cloudPayload());
         if (loadGen !== state.projectLoadGen) return;
@@ -2524,8 +2611,6 @@ function openNewProjectModal() {
   const nameEl = document.getElementById("npName");
   if (!mask) return;
   if (nameEl) nameEl.value = "";
-  const eq = document.querySelector('input[name="npArch"][value="equipment"]');
-  if (eq) eq.checked = true;
   mask.classList.add("show");
   setTimeout(function () { if (nameEl) nameEl.focus(); }, 30);
 }
@@ -2552,15 +2637,13 @@ async function confirmNewProject() {
     if (nameEl) nameEl.focus();
     return;
   }
-  const archEl = document.querySelector('input[name="npArch"]:checked');
-  const arch = (archEl && archEl.value === "hierarchy") ? "hierarchy" : "equipment";
   closeNewProjectModal();
   try {
-    toast("建立專案「" + label + "」（" + (arch === "hierarchy" ? "層級" : "設備") + "）…");
-    const proj = await LineOneDrive.createProject(label, { arch: arch });
+    toast("建立專案「" + label + "」…");
+    const proj = await LineOneDrive.createProject(label, { arch: "unified" });
     state.projects = await LineOneDrive.loadProjectsIndex();
     state.projectsError = "";
-    await activateProject(proj, { skipConfirm: true, fromCloud: true, resetToBlank: true, arch: arch });
+    await activateProject(proj, { skipConfirm: true, fromCloud: true, resetToBlank: true });
   } catch (e) {
     console.error(e);
     const msg = String((e && e.message) || e);
@@ -2576,7 +2659,7 @@ function syncFingerprint(payload) {
   if (!payload) return "";
   try {
     return JSON.stringify({
-      arch: payload.arch || "equipment",
+      arch: payload.arch || "unified",
       source: payload.source || "",
       equipment: payload.equipment || [],
       milestones: payload.milestones || [],
@@ -2636,28 +2719,7 @@ async function checkCloudDrift() {
 }
 function applySavedEquipment(saved) {
   if (!saved) return false;
-  if (projectArchOf(saved) === "hierarchy") {
-    return !!applyProjectPayload(saved);
-  }
-  if (!Array.isArray(saved.equipment)) return false;
-  // 雲端為準：整份覆蓋（避免與網頁內建 BASE 合併後筆數不一致）
-  DATA.arch = "equipment";
-  DATA.equipment = clone(saved.equipment);
-  if (Array.isArray(saved.milestones) && saved.milestones.length) {
-    DATA.milestones = clone(saved.milestones);
-  }
-  if (Array.isArray(saved.stages) && saved.stages.length) {
-    DATA.stages = clone(saved.stages);
-  }
-  if (Array.isArray(saved.segOrder) && saved.segOrder.length) {
-    DATA.segOrder = clone(saved.segOrder);
-  }
-  if (Array.isArray(saved.nodes)) DATA.nodes = clone(saved.nodes);
-  if (saved.title) DATA.title = saved.title;
-  if (saved.subtitle) DATA.subtitle = saved.subtitle;
-  if (saved.source) DATA.source = saved.source;
-  normalizeStructure();
-  return true;
+  return !!applyProjectPayload(saved);
 }
 
 function blankStageBlock(due) {
@@ -3340,7 +3402,7 @@ function snapshotFromPayload(proj, payload) {
     project: proj,
     arch: arch,
     name: (proj && proj.name) || "未命名",
-    title: (payload && payload.title) || ((proj && proj.name) + (arch === "hierarchy" ? "｜層級進度" : "｜架線進度")),
+    title: (payload && payload.title) || ((proj && proj.name) + "｜進度"),
     subtitle: (payload && payload.subtitle) || "",
     equipment: equipment,
     nodes: nodes,
@@ -3361,12 +3423,12 @@ function readLocalProjectSnapshot(proj) {
     const raw = localStorage.getItem(storeKeyForProject(proj));
     if (raw) {
       const saved = JSON.parse(raw);
-      if (saved && (projectArchOf(saved) === "hierarchy" || Array.isArray(saved.equipment))) {
+      if (saved && (Array.isArray(saved.nodes) || Array.isArray(saved.equipment))) {
         return snapshotFromPayload(proj, saved);
       }
     }
   } catch (e) {}
-  return snapshotFromPayload(proj, blankProjectPayload(proj.name, proj.arch));
+  return snapshotFromPayload(proj, blankProjectPayload(proj.name));
 }
 
 async function loadOverviewSnapshots(opts) {
@@ -3383,9 +3445,9 @@ async function loadOverviewSnapshots(opts) {
       try {
         LineOneDrive.setActiveProject(proj);
         const cloud = await LineOneDrive.downloadJson();
-        if (cloud && (projectArchOf(cloud) === "hierarchy" || Array.isArray(cloud.equipment))) {
+        if (cloud && (Array.isArray(cloud.nodes) || Array.isArray(cloud.equipment))) {
           snap = snapshotFromPayload(proj, cloud);
-          if (proj) proj.arch = projectArchOf(cloud);
+          if (proj) proj.arch = "unified";
           try { localStorage.setItem(storeKeyForProject(proj), JSON.stringify(cloud)); } catch (e) {}
         }
       } catch (e) {
@@ -3496,7 +3558,7 @@ function renderProjectsOverviewWeekly() {
 
   const perProject = snaps.map(snap => {
     const pid = (snap.project && snap.project.id) || "";
-    if (snap.arch === "hierarchy") {
+    if (!usesChecklistViews(snap)) {
       const nodes = Array.isArray(snap.nodes) ? snap.nodes : [];
       const root = nodes.find(n => n.level === 1) || nodes[0];
       const pct = root ? (Number(root.pct) || 0) : 0;
@@ -3515,7 +3577,7 @@ function renderProjectsOverviewWeekly() {
       }).join("") || `<tr><td colspan="6">尚無層級項目</td></tr>`;
       return `<section class="proj-overview-block">
         <h3>
-          <span>${escapeHtml(snap.name)}｜層級進度</span>
+          <span>${escapeHtml(snap.name)}｜進度</span>
           <span style="font-size:13px;font-weight:600;color:var(--muted)">完成 ${pctText(pct)}　L2 ${n2}　L3 ${n3}</span>
           <button type="button" class="btn-cloud" data-open-project-id="${escapeAttr(pid)}">進入專案</button>
         </h3>
@@ -4418,28 +4480,49 @@ function render() {
   if (showKpi) renderKpis();
   if (state.tab === "weekly") renderWeekly();
   if (state.tab === "overview") {
-    if (isHierarchyArch()) {
-      document.getElementById("overview").innerHTML = `<p class="note">層級專案請用「周報」檢視進度，或至「清單」編輯層級項目。</p>`;
-    } else renderOverview();
+    if (usesChecklistViews()) renderOverview();
+    else {
+      document.getElementById("overview").innerHTML =
+        `${cloudBarHtml()}<p class="note">結構進度總覽（無設備 checklist 時顯示節點樹；可於設定新增製程段／設備後改為設備矩陣）。</p>${buildHierarchyProgressBlock({ editable: false })}`;
+    }
   }
   if (state.tab === "items") {
-    if (isHierarchyArch()) {
-      renderHierarchyItems();
-    } else renderItems();
+    if (usesChecklistViews()) renderItems();
+    else renderHierarchyItems();
   }
   if (state.tab === "map") {
-    if (isHierarchyArch()) {
-      document.getElementById("map").innerHTML = `<p class="note">層級專案無設備總圖。</p>`;
-    } else renderMap();
+    if (usesChecklistViews()) renderMap();
+    else {
+      document.getElementById("map").innerHTML =
+        `${cloudBarHtml()}<p class="note">節點時程總覽（Start～Finish）。新增設備後可改用設備總圖。</p>${buildHierarchyProgressBlock({ editable: false })}`;
+    }
   }
-  if (state.tab === "settings") {
-    if (isHierarchyArch()) renderHierarchySettings();
-    else renderSettings();
-  }
+  if (state.tab === "settings") renderSettings();
 }
 
 function renderSettings() {
-  normalizeStructure();
+  if (!Array.isArray(DATA.stages)) DATA.stages = [];
+  if (!Array.isArray(DATA.segOrder)) DATA.segOrder = [];
+  if (!Array.isArray(DATA.milestones)) DATA.milestones = [];
+  if (!Array.isArray(DATA.equipment)) DATA.equipment = [];
+  if (!Array.isArray(DATA.nodes)) DATA.nodes = [];
+  // 僅在已有設備時跑完整 normalize（避免空白／純樹專案被灌入 BASE 製程段）
+  if (DATA.equipment.length) {
+    try { normalizeStructure(); } catch (e) { console.warn(e); }
+  } else if (DATA.segOrder.length && DATA.stages.length) {
+    const n = DATA.stages.length;
+    const bySeg = {};
+    (DATA.milestones || []).forEach(m => { if (m && m.seg) bySeg[m.seg] = m; });
+    DATA.milestones = DATA.segOrder.map(seg => {
+      const hit = bySeg[seg] || { seg: seg, dates: [], starts: [] };
+      const dates = Array.isArray(hit.dates) ? hit.dates.slice() : [];
+      const starts = Array.isArray(hit.starts) ? hit.starts.slice() : [];
+      while (dates.length < n) dates.push("");
+      while (starts.length < n) starts.push("");
+      return { seg: seg, dates: dates.slice(0, n), starts: starts.slice(0, n) };
+    });
+  }
+  annotateNodeKinds(DATA.nodes);
   const segRows = DATA.segOrder.map((seg, i) => `
     <div class="set-row set-seg-row" data-set-seg-i="${i}">
       <div class="idx">${i + 1}</div>
@@ -4477,20 +4560,20 @@ function renderSettings() {
   }).join("");
   document.getElementById("settings").innerHTML = `
     ${cloudBarHtml()}
-    <p class="note">設定已整合：上方維護製程段／架線階段名稱，中間一張表同時設設備主檔與適用階段，下方設各製程段時程。左側可切換／新增專案（雲端資料夾：架線進度專案／專案名）。變更寫入本機；同步雲端請按「儲存」。</p>
+    <p class="note">共用設定：① 製程段／群組 ② 階段 ③ 設備主檔 ④ 群組×階段時程 ⑤ 結構樹工具。有設備時清單走 checklist；僅有樹時走層級編輯。變更寫入本機；同步雲端請按「儲存」。</p>
     <div class="settings-unified">
       <div class="settings-structure">
         <section class="settings-panel">
-          <h2>① 設備製程段</h2>
-          <p class="hint">篩選列用的製程段：可新增、刪除、插入、重新命名與排序。</p>
+          <h2>① 製程段／群組</h2>
+          <p class="hint">篩選與時程列用的群組名稱（設備專案＝製程段；亦可當樹的 L1）。</p>
           <div class="set-toolbar">
             <button type="button" data-set-seg-add>＋ 新增製程段</button>
           </div>
           ${segRows || `<p class="note">尚無製程段</p>`}
         </section>
         <section class="settings-panel">
-          <h2>② 架線階段</h2>
-          <p class="hint">清單／甘特用的階段；簡稱顯示於設備表勾選欄與 KPI。</p>
+          <h2>② 階段定義</h2>
+          <p class="hint">清單階段 tab／甘特用；無設備時可留空或當參考。簡稱用於設備表勾選欄。</p>
           <div class="set-toolbar">
             <button type="button" data-set-stage-add>＋ 新增階段</button>
           </div>
@@ -4504,11 +4587,21 @@ function renderSettings() {
       </section>
       <section class="settings-panel full">
         <h2>④ 各製程段 × 階段時程</h2>
-        <p class="hint">每個製程段×階段的預計開始／完成；會同步到總覽與甘特。</p>
+        <p class="hint">每個群組×階段的預計開始／完成；會同步到總覽、甘特，以及清單右鍵套用預設。</p>
         <div class="scroll"><table class="mile-matrix">
           <thead><tr><th>製程段</th>${mileHead}</tr></thead>
-          <tbody>${mileBody || `<tr><td colspan="${1 + DATA.stages.length}">請先新增製程段與階段</td></tr>`}</tbody>
+          <tbody>${mileBody || `<tr><td colspan="${1 + Math.max(1, DATA.stages.length)}">請先新增製程段與階段</td></tr>`}</tbody>
         </table></div>
+      </section>
+      <section class="settings-panel full">
+        <h2>⑤ 結構樹／匯入</h2>
+        <p class="hint">樹狀工作項請至「清單」編輯；此處提供重算與匯入。新增設備後會自動改走設備 checklist 畫面。</p>
+        <div class="toolbar" style="margin-bottom:10px">
+          <button type="button" class="btn-cloud" data-hier-rollup>依下層重算完成率</button>
+          <button type="button" class="btn-cloud" data-hier-import-pdf title="匯入晶睿TY2 R02 電力／CDA／排氣進度表">匯入 PDF 水電進度表</button>
+          <button type="button" class="btn-cloud" data-goto-hier-items>前往清單編輯結構</button>
+        </div>
+        <p class="note">目前節點 ${ (DATA.nodes || []).length }　｜　設備 ${ (DATA.equipment || []).length }　｜　階段 ${ (DATA.stages || []).length }</p>
       </section>
     </div>`;
 }
@@ -4740,7 +4833,7 @@ async function copyCurrentProject(projOpt) {
   }
   writeProjectClipboard({
     name: proj.name,
-    arch: projectArchOf(payload) || proj.arch || "equipment",
+    arch: "unified",
     payload: payload,
     copiedAt: new Date().toISOString()
   });
@@ -4769,12 +4862,12 @@ async function pasteProjectAsNew() {
   try {
     toast("正在貼上專案「" + name + "」…");
     const proj = await LineOneDrive.duplicateProject(
-      { name: clip.name, arch: clip.arch },
+      { name: clip.name, arch: "unified" },
       name,
-      clip.payload
+      Object.assign({}, clip.payload, { arch: "unified" })
     );
     state.projects = await LineOneDrive.loadProjectsIndex();
-    await activateProject(proj, { skipConfirm: true, fromCloud: true, arch: clip.arch });
+    await activateProject(proj, { skipConfirm: true, fromCloud: true });
     toast("已貼上新專案「" + proj.name + "」");
   } catch (e) {
     console.error(e);
@@ -4836,11 +4929,10 @@ function showProjCtxMenu(x, y, projId) {
 }
 
 async function importHierarchyPdfSeed() {
-  if (!isHierarchyArch()) {
-    toast("請先開啟層級架構專案");
+  if (usesChecklistViews() && !confirm("目前為設備 checklist。匯入 PDF 結構樹會清空設備列並改以樹狀顯示，確定？")) {
     return;
   }
-  if (!confirm("匯入晶睿TY2 R02 水電進度表（PDF）到目前層級專案？\n會覆寫目前 nodes。")) return;
+  if (!usesChecklistViews() && !confirm("匯入晶睿TY2 R02 水電進度表（PDF）？\n會覆寫目前結構樹 nodes。")) return;
   let saved = null;
   try {
     const res = await fetch("./seeds/" + encodeURIComponent("R02水電工程_hierarchy.json") + "?v=" + PAGE_BUILD);
@@ -4848,19 +4940,23 @@ async function importHierarchyPdfSeed() {
   } catch (e) {}
   if (!saved && typeof HIERARCHY_SEED_R02 === "object") saved = HIERARCHY_SEED_R02;
   if (!saved || !Array.isArray(saved.nodes)) {
-    toast("找不到 PDF 層級種子資料");
+    toast("找不到 PDF 結構樹種子資料");
     return;
   }
   const name = (state.project && state.project.name) || "R02水電工程";
   const payload = Object.assign({}, saved, {
-    title: name + "｜層級進度",
+    title: name + "｜進度",
     projectName: name,
-    arch: "hierarchy"
+    arch: "unified",
+    equipment: [],
+    stages: Array.isArray(DATA.stages) ? clone(DATA.stages) : (saved.stages || []),
+    segOrder: [],
+    milestones: []
   });
   applyProjectPayload(payload);
-  if (state.project) state.project.arch = "hierarchy";
+  if (state.project) state.project.arch = "unified";
   state.dirty = true;
-  saveLocal("已匯入 PDF 層級進度表（尚未寫入雲端）");
+  saveLocal("已匯入 PDF 結構樹（尚未寫入雲端）");
   render();
 }
 
@@ -5169,7 +5265,7 @@ function showDateCtxMenu(x, y, input) {
   const grabBothBtn = menu.querySelector('[data-date-ctx="grab-both"]');
   const inItemList = !!(input.getAttribute("data-item-idx") != null || input.closest(".date-cell, .date-drop"));
   const inMileMatrix = input.matches("[data-mile-start], [data-mile-due]");
-  const showGrab = inItemList && !inMileMatrix && !isHierarchyArch() && !isProjectsOverview();
+  const showGrab = inItemList && !inMileMatrix && usesChecklistViews() && !isProjectsOverview();
   const defs = showGrab
     ? getSegStageDefaultDates(state.stage)
     : { start: "", due: "", seg: "", mileSeg: "", stageName: "", fromAssessment: false, sourceStageName: "" };

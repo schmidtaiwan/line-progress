@@ -159,7 +159,9 @@
       id: String((p && (p.id || p.name)) || folderName),
       name: name,
       folderPath: projectsRootParts().concat([folderName]).join("/"),
-      arch: p && p.arch === "hierarchy" ? "hierarchy" : "equipment",
+      arch: (p && (p.arch === "hierarchy" || p.arch === "equipment" || p.arch === "unified"))
+        ? p.arch
+        : "unified",
       legacyFallback: !!(p && p.legacyFallback),
       legacyFolderPath: (p && p.legacyFolderPath) || "",
       legacyFileName: (p && p.legacyFileName) || "",
@@ -450,8 +452,12 @@
             if (!best) return acc;
             return fetchJsonInFolder(best.id, fileName()).then(function (payload) {
               const hint = hints[k] || {};
-              const arch = (payload && payload.arch === "hierarchy") || hint.arch === "hierarchy"
-                ? "hierarchy" : "equipment";
+              let arch = "unified";
+              if (payload && payload.arch) arch = payload.arch;
+              else if (hint.arch) arch = hint.arch;
+              else if (payload && Array.isArray(payload.equipment) && payload.equipment.length
+                && Array.isArray(payload.stages) && payload.stages.length) arch = "equipment";
+              else if (payload && Array.isArray(payload.nodes) && payload.nodes.length) arch = "hierarchy";
               // 強制重建時優先用指定顯示名稱（與雲端資料夾一致）
               const displayName = String((hint.name) || best.name || k).trim() || k;
               acc.push(normalizeProjectRecord({
@@ -553,7 +559,7 @@
     opts = opts || {};
     const label = String(name || "").trim();
     if (!label) return Promise.reject(new Error("請輸入專案名稱"));
-    const arch = opts.arch === "hierarchy" ? "hierarchy" : "equipment";
+    const arch = opts.arch || "unified";
     const folderName = sanitizeProjectFolderName(label);
     const folderPath = projectsRootParts().concat([folderName]).join("/");
     const proj = {
@@ -602,8 +608,7 @@
   /** 複製專案：新建名稱＋資料夾，可選寫入 payload */
   function duplicateProject(sourceProj, newName, payload) {
     const src = sourceProj || {};
-    const arch = (payload && payload.arch === "hierarchy") || src.arch === "hierarchy"
-      ? "hierarchy" : "equipment";
+    const arch = (payload && payload.arch) || src.arch || "unified";
     return loadProjectsIndex().then(function (list) {
       const label = uniqueProjectName(newName || ((src.name || "專案") + " 副本"), list);
       return createProject(label, { arch: arch }).then(function (proj) {
