@@ -284,6 +284,19 @@
   .gantt-label[data-gantt-eq]:hover { background: #e7f0f7; }
   .weekly-eq-body { padding: 2px 0 8px; }
   .weekly-eq-panel .detail.card { border: 0; box-shadow: none; padding: 0; background: transparent; }
+  .report-updates {
+    margin: 14px 0 18px; padding: 14px 16px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+  }
+  .report-updates-head {
+    display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .report-updates-head h2 { margin: 0; font-size: 17px; }
+  .report-updates .work-cell {
+    max-width: 420px; white-space: pre-wrap; line-height: 1.45; font-size: 13px;
+  }
+  .report-updates .pct-delta { font-weight: 700; white-space: nowrap; }
   .gantt-wrap .gantt-legend {
     display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 13pt; color: var(--muted);
   }
@@ -1578,7 +1591,7 @@
   </div>
   <p id="subtitle"></p>
   <nav class="tabs" id="tabs">
-    <button data-tab="weekly" class="active"><span class="tab-full">周報</span><span class="tab-short">周報</span></button>
+    <button data-tab="weekly" class="active"><span class="tab-full">報表</span><span class="tab-short">報表</span></button>
     <button data-tab="overview"><span class="tab-full">總覽</span><span class="tab-short">總覽</span></button>
     <button data-tab="items"><span class="tab-full">清單</span><span class="tab-short">清單</span></button>
     <button data-tab="map"><span class="tab-full">總圖</span><span class="tab-short">總圖</span></button>
@@ -1660,7 +1673,7 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=81"></script>
+<script src="google_config.js?v=82"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
@@ -1676,7 +1689,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1687,7 +1700,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 81;
+const PAGE_BUILD = 82;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -2531,7 +2544,7 @@ function renderProjectRail() {
   const list = state.projects || [];
   const curId = state.project && state.project.id;
   const overviewOn = curId === PROJECTS_OVERVIEW_ID ? "on" : "";
-  let html = `<button type="button" class="proj-btn overview-btn ${overviewOn}" data-projects-overview title="各專案周報與合併總表">專案總覽</button>`;
+  let html = `<button type="button" class="proj-btn overview-btn ${overviewOn}" data-projects-overview title="各專案報表與合併總表">專案總覽</button>`;
   const who = isCloudLoggedIn() ? accountScopeKey() : "";
   if (who && who !== "anon") {
     const shared = !!(window.LineOneDrive && typeof LineOneDrive.isSharedProjectsRoot === "function" && LineOneDrive.isSharedProjectsRoot());
@@ -3760,7 +3773,7 @@ function renderKpis() {
   ).join("") + `<span>總計 <b>${delay}</b></span>`;
   const cards = [
     { label: "設備數", value: String(DATA.equipment.length), sub: segCounts },
-    { label: "架線前準備完成率", value: pctText(ratio), sub: "依細項平均，與周報公式相同" },
+    { label: "架線前準備完成率", value: pctText(ratio), sub: "依細項平均，與報表公式相同" },
     { label: "高急迫未完成", value: String(high), sub: "架線前準備，狀態不是已完成" },
     { label: "五階段延誤項", value: String(delay), sub: "狀態為延誤中的細項", extra: `<div class="delay-break">${delayBreak}</div>` }
   ];
@@ -4153,7 +4166,7 @@ async function activateProjectsOverview(opts) {
   state.openRemark = null;
   state.openDates = null;
   DATA.title = "專案總覽｜架線進度";
-  DATA.subtitle = "各專案周報摘要＋合併總表（點左側專案可進入單案編輯）";
+  DATA.subtitle = "各專案報表摘要＋合併總表（點左側專案可進入單案編輯）";
   state.overviewLoading = true;
   render();
   try {
@@ -4271,7 +4284,7 @@ function renderProjectsOverviewWeekly() {
       `<tr><td colspan="6">尚無設備</td></tr>`;
     return `<section class="proj-overview-block">
       <h3>
-        <span>${escapeHtml(snap.name)}｜架線周報</span>
+        <span>${escapeHtml(snap.name)}｜架線報表</span>
         <span style="font-size:13px;font-weight:600;color:var(--muted)">設備 ${eqs.length}　準備 ${pctText(ratio)}　高急迫 ${high}</span>
         <button type="button" class="btn-cloud" data-open-project-id="${escapeAttr(pid)}">進入專案</button>
       </h3>
@@ -4286,14 +4299,15 @@ function renderProjectsOverviewWeekly() {
   document.getElementById("weekly").innerHTML = `
     ${cloudBarHtml()}
     <section class="proj-overview-block proj-overview-merged">
-      <h3><span>專案總覽周報｜全部專案合併</span><span style="font-size:13px;font-weight:600;color:var(--muted)">${snaps.length} 個專案</span></h3>
+      <h3><span>專案總覽報表｜全部專案合併</span><span style="font-size:13px;font-weight:600;color:var(--muted)">${snaps.length} 個專案</span></h3>
       <p class="note" style="margin-top:0">將所有專案設備進度放在同一張表，方便一次對照。</p>
       <div class="scroll desktop-table"><table>
         <thead>${mergedHead}</thead>
         <tbody>${mergedBody}</tbody>
       </table></div>
     </section>
-    <h2 class="section-title">各專案架線周報</h2>
+    ${buildProgressUpdatesHtml({ overview: true })}
+    <h2 class="section-title">各專案架線報表</h2>
     ${perProject}
     <p class="note">總覽為唯讀彙整。要改進度請點「進入專案」或左側專案名稱。可用左側「全部儲存」一次寫回雲端。</p>`;
 }
@@ -4464,8 +4478,8 @@ function buildHierarchyProgressBlock(opts) {
     : "";
   const headExtra = editable ? "<th>照片</th><th>操作</th>" : "";
   const note = editable
-    ? `<p class="note">可在此編輯／新增層級、備註與照片。第2／1層完成率可由第3層自動彙總。編輯後請按「儲存本專案」。「周報」為只讀檢視。</p>`
-    : `<p class="note">周報為只讀顯示。新增／編輯層級、備註與照片請至「清單」。</p>`;
+    ? `<p class="note">可在此編輯／新增層級、備註與照片。第2／1層完成率可由第3層自動彙總。編輯後請按「儲存本專案」。「報表」為只讀檢視。</p>`
+    : `<p class="note">報表為只讀顯示。新增／編輯層級、備註與照片請至「清單」。</p>`;
 
   return `
     <div class="hier-legend">
@@ -4491,7 +4505,8 @@ function buildHierarchyProgressBlock(opts) {
 function renderHierarchyWeekly() {
   document.getElementById("weekly").innerHTML = `
     ${cloudBarHtml()}
-    ${buildHierarchyProgressBlock({ editable: false })}`;
+    ${buildHierarchyProgressBlock({ editable: false })}
+    <p class="note">層級專案的「進度更新」請至清單細項登記；目前報表以層級進度表為主。</p>`;
 }
 
 function renderHierarchyItems() {
@@ -4503,12 +4518,144 @@ function renderHierarchyItems() {
 function renderHierarchySettings() {
   document.getElementById("settings").innerHTML = `
     <h2 class="section-title">層級專案設定</h2>
-    <p class="note">第1層＝專案（紅）、第2層＝階段（橘）、第3層＝工作項（綠）。日常編輯請至「清單」；「周報」僅供檢視。</p>
+    <p class="note">第1層＝專案（紅）、第2層＝階段（橘）、第3層＝工作項（綠）。日常編輯請至「清單」；「報表」僅供檢視。</p>
     <div class="toolbar" style="margin-bottom:10px">
       <button type="button" class="btn-cloud" data-hier-rollup>依下層重算完成率</button>
       <button type="button" class="btn-cloud" data-hier-import-pdf title="匯入晶睿TY2 R02 電力／CDA／排氣進度表">匯入 PDF 水電進度表</button>
       <button type="button" class="btn-cloud" data-goto-hier-items>前往清單編輯</button>
     </div>`;
+}
+
+/** 報表：今日／本週（週一～日）／本月 的時間區間 */
+function reportPeriodRange(period) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const d = now.getDate();
+  let start;
+  let end;
+  if (period === "month") {
+    start = new Date(y, m, 1);
+    end = new Date(y, m + 1, 0, 23, 59, 59, 999);
+  } else if (period === "week") {
+    const day = now.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    start = new Date(y, m, d + mondayOffset);
+    end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6, 23, 59, 59, 999);
+  } else {
+    start = new Date(y, m, d);
+    end = new Date(y, m, d, 23, 59, 59, 999);
+  }
+  return { start: start.getTime(), end: end.getTime(), startDate: start, endDate: end };
+}
+
+function fmtReportDay(d) {
+  return (d.getMonth() + 1) + "/" + d.getDate();
+}
+
+function collectProgressUpdates(period, equipmentList, projectName) {
+  const range = reportPeriodRange(period || state.reportPeriod || "today");
+  const eqs = equipmentList || DATA.equipment || [];
+  const stages = DATA.stages || [];
+  const rows = [];
+  eqs.forEach(function (eq) {
+    (eq.stages || []).forEach(function (st, si) {
+      const stageName = (stages[si] && (stages[si].name || stages[si].mark)) || ("階段" + (si + 1));
+      (st.items || []).forEach(function (it) {
+        ensureItemProgressLog(it);
+        (it.progressLog || []).forEach(function (e) {
+          const t = Date.parse(e.at);
+          if (!Number.isFinite(t) || t < range.start || t > range.end) return;
+          rows.push({
+            t: t,
+            at: e.at,
+            project: projectName || "",
+            eq: ((eq.idx != null && eq.idx !== "" ? eq.idx + " " : "") + (eq.name || "")).trim() || "—",
+            stage: stageName,
+            item: it.item || "未命名",
+            fromPct: e.fromPct,
+            toPct: e.toPct,
+            work: e.work || "",
+            by: e.by || ""
+          });
+        });
+      });
+    });
+  });
+  rows.sort(function (a, b) { return b.t - a.t; });
+  return { range: range, rows: rows };
+}
+
+function buildProgressUpdatesHtml(opts) {
+  opts = opts || {};
+  const period = state.reportPeriod || "today";
+  let pack;
+  if (opts.overview) {
+    const rows = [];
+    let range = reportPeriodRange(period);
+    (state.overviewSnapshots || []).forEach(function (snap) {
+      const p = collectProgressUpdates(period, snap.equipment || [], snap.name || "");
+      Array.prototype.push.apply(rows, p.rows);
+      range = p.range;
+    });
+    rows.sort(function (a, b) { return b.t - a.t; });
+    pack = { range: range, rows: rows };
+  } else {
+    pack = collectProgressUpdates(period, opts.equipment, opts.projectName);
+  }
+  const periods = [
+    { id: "today", label: "今日" },
+    { id: "week", label: "本週" },
+    { id: "month", label: "本月" }
+  ];
+  const chips = periods.map(function (p) {
+    return `<button type="button" data-report-period="${p.id}" class="${period === p.id ? "on" : ""}">${p.label}</button>`;
+  }).join("");
+  const rangeTxt = fmtReportDay(pack.range.startDate) + " ~ " + fmtReportDay(pack.range.endDate);
+  const showProj = !!opts.overview;
+  const colSpan = showProj ? 8 : 7;
+  const headProj = showProj ? "<th>專案</th>" : "";
+  const body = pack.rows.length
+    ? pack.rows.map(function (r) {
+        const projTd = showProj ? `<td>${escapeHtml(r.project || "—")}</td>` : "";
+        return `<tr>
+          <td>${escapeHtml(String(r.at || "").replace("T", " ").slice(0, 16))}</td>
+          ${projTd}
+          <td>${escapeHtml(r.eq)}</td>
+          <td>${escapeHtml(r.stage)}</td>
+          <td>${escapeHtml(r.item)}</td>
+          <td class="pct-delta">${formatPctRatio(r.fromPct)} → ${formatPctRatio(r.toPct)}</td>
+          <td class="work-cell">${escapeHtml(r.work || "（未填更新內容）")}</td>
+          <td>${escapeHtml(r.by || "—")}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="${colSpan}">此區間尚無進度更新。請至「清單」展開細項，按「今日進度」填寫更新內容說明後登記。</td></tr>`;
+  const cards = pack.rows.length
+    ? pack.rows.map(function (r) {
+        return `<article class="m-eq-card">
+          <div class="m-title">${escapeHtml(String(r.at || "").replace("T", " ").slice(0, 16))}　${escapeHtml(r.eq)}</div>
+          ${showProj ? `<div class="m-field"><label>專案</label><div>${escapeHtml(r.project || "—")}</div></div>` : ""}
+          <div class="m-field"><label>階段／細項</label><div>${escapeHtml(r.stage)}　${escapeHtml(r.item)}</div></div>
+          <div class="m-field"><label>完成率</label><div class="pct-delta">${formatPctRatio(r.fromPct)} → ${formatPctRatio(r.toPct)}</div></div>
+          <div class="m-field"><label>更新內容說明</label><div class="work-cell">${escapeHtml(r.work || "（未填）")}</div></div>
+          <div class="m-field"><label>登記人</label><div>${escapeHtml(r.by || "—")}</div></div>
+        </article>`;
+      }).join("")
+    : `<p class="note">此區間尚無進度更新紀錄。</p>`;
+  return `<section class="report-updates">
+    <div class="report-updates-head">
+      <h2>進度更新</h2>
+      <div class="chips">${chips}</div>
+    </div>
+    <p class="note">區間 ${rangeTxt}　共 ${pack.rows.length} 筆　｜　可切換今日／本週／本月，檢視登記時的更新內容說明</p>
+    <div class="m-eq-cards">${cards}</div>
+    <div class="scroll desktop-table"><table>
+      <thead><tr>
+        <th>時間</th>${headProj}<th>設備</th><th>階段</th><th>細項</th><th>完成率</th><th>更新內容說明</th><th>登記人</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>
+  </section>`;
 }
 
 function renderWeekly() {
@@ -4563,10 +4710,14 @@ function renderWeekly() {
     };
   });
   const mainPanel = state.weeklyPanel === "eq" ? buildWeeklyEqPanelHtml() : renderLineGanttHtml();
+  const updatesHtml = buildProgressUpdatesHtml({
+    projectName: (state.project && state.project.name) || ""
+  });
   document.getElementById("weekly").innerHTML = `
     <div class="cards">${cards}</div>
     ${cloudBarHtml()}
     ${mainPanel}
+    ${updatesHtml}
     ${chipsToolbar("")}
     <h2 class="section-title">急迫性「高」｜各製程段待處理第一項</h2>
     <div class="m-eq-cards">${tops.map(t => t.card).join("")}</div>
@@ -4775,7 +4926,7 @@ function progressLogHtml(it, idx) {
   const cur = ((Number(it.pct) || 0) * 100).toFixed(1);
   return `<div class="prog-log-box" data-prog-log="${idx}">
     <div class="prog-log-title">📝 在這裡寫今日進度</div>
-    <label>今日做了什麼事</label>
+    <label>更新內容說明</label>
     <textarea data-prog-work="${idx}" rows="2" placeholder="例如：電氣插座確認完成一半、配線已定位…"></textarea>
     <div class="prog-log-row">
       <label>更新後完成率％</label>
@@ -5291,7 +5442,7 @@ function render() {
   document.body.classList.remove("locked");
   if (isProjectsOverview()) {
     DATA.title = "專案總覽｜架線進度";
-    DATA.subtitle = "各專案周報摘要＋合併總表（點左側專案可進入單案編輯）";
+    DATA.subtitle = "各專案報表摘要＋合併總表（點左側專案可進入單案編輯）";
     if (state.tab !== "weekly") state.tab = "weekly";
   }
   document.getElementById("title").textContent = DATA.title;
@@ -5302,7 +5453,7 @@ function render() {
     btn.classList.toggle("active", btn.dataset.tab === state.tab);
     if (isProjectsOverview() && btn.dataset.tab !== "weekly") {
       btn.style.opacity = "0.45";
-      btn.title = "總覽模式僅顯示周報，請先選左側專案";
+      btn.title = "總覽模式僅顯示報表，請先選左側專案";
     } else {
       btn.style.opacity = "";
       if (btn.dataset.tab !== "settings") btn.title = "";
@@ -7145,10 +7296,17 @@ document.body.addEventListener("click", ev => {
   }
   // 未登入時不處理分頁／資料操作
   if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) return;
+  const reportPeriodBtn = ev.target.closest("[data-report-period]");
+  if (reportPeriodBtn) {
+    state.reportPeriod = reportPeriodBtn.dataset.reportPeriod || "today";
+    if (state.tab === "weekly") renderWeekly();
+    else render();
+    return;
+  }
   const tab = ev.target.closest("nav.tabs button");
   if (tab) {
     if (isProjectsOverview() && tab.dataset.tab !== "weekly") {
-      toast("專案總覽僅顯示周報，請先點左側單一專案");
+      toast("專案總覽僅顯示報表，請先點左側單一專案");
       return;
     }
     state.tab = tab.dataset.tab;
