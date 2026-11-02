@@ -1341,6 +1341,31 @@
     });
   }
 
+  /** 快取 fileId 必須屬於目前專案資料夾，避免 DIP 讀到 VIVO 的檔 */
+  function fetchJsonIfInActiveFolder(fileId) {
+    if (!fileId) return Promise.resolve(null);
+    return ensureFolderId().then(function (folderId) {
+      return driveFetch(
+        "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) +
+        "?fields=id,name,parents&supportsAllDrives=true"
+      ).then(function (res) {
+        if (!res.ok) return null;
+        return res.json();
+      }).then(function (meta) {
+        if (!meta || !meta.id) return null;
+        const parents = meta.parents || [];
+        if (folderId && folderId !== "root" && parents.indexOf(folderId) < 0) {
+          saveStoredFileId("");
+          return null;
+        }
+        return fetchJsonById(fileId);
+      }).catch(function () {
+        saveStoredFileId("");
+        return null;
+      });
+    });
+  }
+
   function downloadJson() {
     state.busy = true;
     return ensureInit()
@@ -1353,7 +1378,7 @@
           const key = projCacheKey(activeProject);
           const cachedId = state.fileId || (key && fileIdByProject[key]) || "";
           const tryCached = cachedId
-            ? fetchJsonById(cachedId).then(function (data) {
+            ? fetchJsonIfInActiveFolder(cachedId).then(function (data) {
                 if (data) {
                   saveStoredFileId(cachedId);
                   return data;

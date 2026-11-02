@@ -1566,7 +1566,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 62;
+const PAGE_BUILD = 63;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -2547,16 +2547,27 @@ function payloadLooksLikeVivoLine(payload) {
   return false;
 }
 
-/** VIVO（或非機電案）載到機電／水電內容時要強制還原 */
+/** 內容是否與專案不符（需強制還原） */
 function shouldForceRecoverProjectPayload(proj, payload) {
   if (!proj || !payload) return false;
-  if (projectShouldUseMepSeed(proj.name)) return false;
-  if (payloadLooksLikeForeignMep(payload)) return true;
-  if (isVivoLineProject(proj) && !payloadLooksLikeVivoLine(payload)) {
-    const hasData = (Array.isArray(payload.equipment) && payload.equipment.length)
-      || (Array.isArray(payload.nodes) && payload.nodes.length);
-    return !!hasData;
+  const name = String(proj.name || "");
+  // 機電／水電專案：不套用此還原
+  if (projectShouldUseMepSeed(name)) return false;
+
+  if (isVivoLineProject(proj)) {
+    // VIVO 卻是機電內容 → 還原
+    if (payloadLooksLikeForeignMep(payload)) return true;
+    // VIVO 卻完全不像架線設備 → 還原
+    if (!payloadLooksLikeVivoLine(payload)) {
+      const hasData = (Array.isArray(payload.equipment) && payload.equipment.length)
+        || (Array.isArray(payload.nodes) && payload.nodes.length);
+      return !!hasData;
+    }
+    return false;
   }
+
+  // DIP 等非 VIVO：若內容是 VIVO 架線（板階段／送板機／電控需求）→ 誤植，必須清掉
+  if (payloadLooksLikeVivoLine(payload)) return true;
   return false;
 }
 
@@ -2575,33 +2586,79 @@ function vivoEquipmentRecoverPayload(proj) {
     milestones: clone(d.milestones || []),
     stages: clone(d.stages || []),
     segOrder: clone(d.segOrder || []),
-    nodes: []
+    nodes: [],
+    projectName: name
   };
+}
+
+async function tryRecoverFromHistory(proj) {
+  if (!window.LineOneDrive || typeof LineOneDrive.listHistoryFiles !== "function") return null;
+  try {
+    const files = await LineOneDrive.listHistoryFiles();
+    for (let i = 0; i < (files || []).length; i++) {
+      const f = files[i];
+      if (!f || !f.id) continue;
+      let data = null;
+      try { data = await LineOneDrive.loadHistoryJson(f.id); } catch (e) { continue; }
+      if (!data) continue;
+      if (shouldForceRecoverProjectPayload(proj, data)) continue;
+      if (!isVivoLineProject(proj) && payloadLooksLikeVivoLine(data)) continue;
+      return data;
+    }
+  } catch (e) {
+    console.warn(e);
+  }
+  return null;
 }
 
 async function forceRecoverWrongProjectData(proj) {
   if (typeof LineOneDrive.clearActiveFileCache === "function") {
     LineOneDrive.clearActiveFileCache();
   }
+  const label = (proj && proj.name) || "專案";
   let recovered = null;
-  if (proj && proj.legacyFallback && typeof LineOneDrive.findLegacyData === "function") {
-    try { recovered = await LineOneDrive.findLegacyData(); } catch (e) { console.warn(e); }
-  }
-  if (!recovered || !payloadLooksLikeVivoLine(recovered)) {
-    recovered = vivoEquipmentRecoverPayload(proj);
+  let note = "";
+
+  if (isVivoLineProject(proj)) {
+    if (proj.legacyFallback && typeof LineOneDrive.findLegacyData === "function") {
+      try { recovered = await LineOneDrive.findLegacyData(); } catch (e) { console.warn(e); }
+    }
+    if (!recovered || !payloadLooksLikeVivoLine(recovered)) {
+      recovered = vivoEquipmentRecoverPayload(proj);
+      note = "已還原 VIVO 內建／舊檔資料";
+    } else {
+      recovered = Object.assign({}, recovered, {
+        arch: "unified",
+        title: label + "｜架線進度",
+        projectName: label
+      });
+      note = "已自舊路徑還原 VIVO 資料";
+    }
   } else {
-    recovered = Object.assign({}, recovered, {
-      arch: "unified",
-      title: ((proj && proj.name) || "VIVO R01") + "｜架線進度",
-      projectName: (proj && proj.name) || "VIVO R01"
-    });
+    // 絕不可把 VIVO BASE 寫進 DIP 等專案
+    recovered = await tryRecoverFromHistory(proj);
+    if (recovered) {
+      recovered = Object.assign({}, recovered, {
+        arch: "unified",
+        title: label + "｜進度",
+        projectName: label
+      });
+      note = "已自雲端歷史還原「" + label + "」";
+    } else {
+      recovered = blankProjectPayload(label);
+      recovered.projectName = label;
+      recovered.title = label + "｜進度";
+      note = "偵測到「" + label + "」誤載 VIVO 內容，已清空（請從歷史還原或重新匯入）";
+    }
   }
+
   applyProjectPayload(recovered);
   if (state.project) state.project.arch = "unified";
-  DATA.title = ((proj && proj.name) || "VIVO R01") + "｜架線進度";
+  DATA.title = recovered.title || (label + "｜進度");
   if (recovered.subtitle) DATA.subtitle = recovered.subtitle;
   await LineOneDrive.uploadJson(cloudPayload());
   try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
+  if (note) toast(note);
   return recovered;
 }
 
