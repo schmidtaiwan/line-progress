@@ -1649,7 +1649,7 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=79"></script>
+<script src="google_config.js?v=80"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
@@ -1676,7 +1676,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 79;
+const PAGE_BUILD = 80;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -4771,6 +4771,28 @@ function progressLogHtml(it, idx) {
   </div>`;
 }
 
+/** 依完成率同步狀態：100%→已完成；有進度且仍「未開始」→進行中。回傳提示字或 ""。 */
+function syncItemStatusFromPct(it, ratio) {
+  if (!it) return "";
+  const to = Math.max(0, Math.min(1, Number(ratio) || 0));
+  if (to >= 0.999) {
+    const changed = it.status !== "已完成";
+    it.status = "已完成";
+    if (!it.actual) {
+      const d = new Date();
+      const pad = function (n) { return String(n).padStart(2, "0"); };
+      it.actual = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+        "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+    }
+    return changed ? "狀態已改為「已完成」" : "";
+  }
+  if (to > 0 && (it.status === "未開始" || !it.status)) {
+    it.status = "進行中";
+    return "狀態已改為「進行中」";
+  }
+  return "";
+}
+
 function submitItemProgress(itemIdx, workRaw, pctRaw) {
   const eq = DATA.equipment[state.eq];
   const it = eq && eq.stages[state.stage] && eq.stages[state.stage].items[itemIdx];
@@ -4794,8 +4816,7 @@ function submitItemProgress(itemIdx, workRaw, pctRaw) {
     by: accountScopeKey() || ""
   });
   it.pct = to;
-  if (to >= 0.999) it.status = "已完成";
-  else if (to > 0 && (it.status === "未開始" || !it.status)) it.status = "進行中";
+  const statusMsg = syncItemStatusFromPct(it, to);
   state.openRemark = itemIdx;
   state.itemsExpand = true;
   saveLocal("已登記進度：" + formatPctRatio(from) + " → " + formatPctRatio(to));
@@ -4804,7 +4825,7 @@ function submitItemProgress(itemIdx, workRaw, pctRaw) {
   } else {
     render();
   }
-  toast("已記錄進度更新");
+  toast(statusMsg ? ("已記錄進度更新；" + statusMsg) : "已記錄進度更新");
 }
 function photoGalleryHtml(it, idx) {
   const photos = itemPhotos(it);
@@ -6725,6 +6746,7 @@ function patchItemField(itemIdx, field, raw) {
     if (Number.isNaN(n)) n = 0;
     n = Math.max(0, Math.min(100, n));
     it.pct = n / 100;
+    syncItemStatusFromPct(it, it.pct);
   }
   if (field === "urg") it.urg = URG_OPTS.includes(raw) ? raw : "中";
   if (field === "status") it.status = STATUS_OPTS.includes(raw) ? raw : "未開始";
@@ -6749,7 +6771,10 @@ function patchItemField(itemIdx, field, raw) {
     const urg = row.querySelector('[data-field="urg"]');
     if (urg) urg.className = "u-" + it.urg;
     const st = row.querySelector('[data-field="status"]');
-    if (st) st.className = "s-" + it.status;
+    if (st) {
+      st.className = "s-" + it.status;
+      if (document.activeElement !== st) st.value = it.status || "未開始";
+    }
     const hit = row.querySelector(".item-name-hit");
     if (hit) {
       hit.textContent = it.item || "未命名項目";
