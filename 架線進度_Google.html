@@ -1582,7 +1582,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 55;
+const PAGE_BUILD = 56;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -3950,12 +3950,18 @@ function overviewStageHeadHtml() {
     ? Array.from(new Set((visibleEq() || []).map(eq => eq.seg).filter(Boolean)))
     : [state.seg];
   const useSegs = segs.length ? segs : ((DATA.segOrder || []).slice());
+  const ai = assessmentStageIndex();
   return (DATA.stages || []).map((s, si) => {
     const ranges = useSegs.map(seg => {
-      const m = (DATA.milestones || []).find(x => x && x.seg === seg);
+      const m = milestoneForSeg(seg);
       if (!m) return "";
-      const start = (m.starts && m.starts[si]) || "";
-      const due = (m.dates && m.dates[si]) || "";
+      let start = (m.starts && m.starts[si]) || "";
+      let due = (m.dates && m.dates[si]) || "";
+      // 此階段未填 → 改用評估階段
+      if ((!start || !due) && si !== ai) {
+        if (!start) start = (m.starts && m.starts[ai]) || "";
+        if (!due) due = (m.dates && m.dates[ai]) || "";
+      }
       if (start && due) return String(start) + " ~ " + String(due);
       return String(due || start || "");
     }).filter(Boolean);
@@ -4997,19 +5003,73 @@ function resolveDateInputFromEvent(ev) {
   return null;
 }
 
-/** 設定頁「製程段 × 階段」預設時程（依目前設備製程段＋目前階段） */
-function getSegStageDefaultDates(stageIdx) {
-  const eq = DATA.equipment && DATA.equipment[state.eq];
-  if (!eq || !eq.seg) return { start: "", due: "", seg: "", stageName: "" };
-  const si = Number.isFinite(stageIdx) ? stageIdx : state.stage;
-  const m = (DATA.milestones || []).find(x => x && x.seg === eq.seg);
-  const stageName = (DATA.stages[si] && (DATA.stages[si].name || DATA.stages[si].mark)) || ("階段" + (si + 1));
-  if (!m) return { start: "", due: "", seg: eq.seg, stageName: stageName };
+/** 評估階段索引（名稱含「評估」；否則第 0 階） */
+function assessmentStageIndex() {
+  const stages = DATA.stages || [];
+  const hit = stages.findIndex(s => /評估/.test(String((s && (s.name || s.mark)) || "")));
+  return hit >= 0 ? hit : 0;
+}
+
+function milestoneForSeg(seg) {
+  const name = String(seg || "").trim();
+  if (!name) return null;
+  const list = DATA.milestones || [];
+  let m = list.find(x => x && x.seg === name);
+  if (m) return m;
+  // 去空白比對（DIP_D02 vs 測試段 仍各自分開；僅處理空白差異）
+  const key = name.replace(/\s+/g, "").toLowerCase();
+  return list.find(x => String((x && x.seg) || "").replace(/\s+/g, "").toLowerCase() === key) || null;
+}
+
+function readMileStartDue(m, si) {
+  if (!m) return { start: "", due: "" };
   return {
     start: normalizeDateValue((m.starts && m.starts[si]) || "") || "",
-    due: normalizeDateValue((m.dates && m.dates[si]) || "") || "",
+    due: normalizeDateValue((m.dates && m.dates[si]) || "") || ""
+  };
+}
+
+/**
+ * 設定頁「製程段 × 階段」預設時程。
+ * 若目前階段未填，改抓「評估階段」的開始／完成時間。
+ */
+function getSegStageDefaultDates(stageIdx) {
+  const eq = DATA.equipment && DATA.equipment[state.eq];
+  if (!eq || !eq.seg) {
+    return { start: "", due: "", seg: "", stageName: "", fromAssessment: false, sourceStageName: "" };
+  }
+  const si = Number.isFinite(stageIdx) ? stageIdx : state.stage;
+  const m = milestoneForSeg(eq.seg);
+  const stageName = (DATA.stages[si] && (DATA.stages[si].name || DATA.stages[si].mark)) || ("階段" + (si + 1));
+  const cur = readMileStartDue(m, si);
+  let start = cur.start;
+  let due = cur.due;
+  let fromAssessment = false;
+  let sourceStageName = stageName;
+  if (!start || !due) {
+    const ai = assessmentStageIndex();
+    if (ai !== si) {
+      const fallback = readMileStartDue(m, ai);
+      const aName = (DATA.stages[ai] && (DATA.stages[ai].name || DATA.stages[ai].mark)) || "評估階段";
+      if (!start && fallback.start) {
+        start = fallback.start;
+        fromAssessment = true;
+        sourceStageName = aName;
+      }
+      if (!due && fallback.due) {
+        due = fallback.due;
+        fromAssessment = true;
+        sourceStageName = aName;
+      }
+    }
+  }
+  return {
+    start: start,
+    due: due,
     seg: eq.seg,
-    stageName: stageName
+    stageName: stageName,
+    fromAssessment: fromAssessment,
+    sourceStageName: sourceStageName
   };
 }
 
@@ -5053,27 +5113,29 @@ function showDateCtxMenu(x, y, input) {
   const inItemList = !!(input.getAttribute("data-item-idx") != null || input.closest(".date-cell, .date-drop"));
   const inMileMatrix = input.matches("[data-mile-start], [data-mile-due]");
   const showGrab = inItemList && !inMileMatrix && !isHierarchyArch() && !isProjectsOverview();
-  const defs = showGrab ? getSegStageDefaultDates(state.stage) : { start: "", due: "", seg: "", stageName: "" };
-  const defTip = defs.seg
-    ? ("設定頁：" + defs.seg + " × " + defs.stageName)
-    : "請先在設定頁填寫各製程段時程";
+  const defs = showGrab
+    ? getSegStageDefaultDates(state.stage)
+    : { start: "", due: "", seg: "", stageName: "", fromAssessment: false, sourceStageName: "" };
+  const srcLabel = defs.fromAssessment
+    ? (defs.seg + " × " + (defs.sourceStageName || "評估階段") + "（目前階段未填，改用評估）")
+    : (defs.seg ? ("設定頁：" + defs.seg + " × " + defs.stageName) : "請先在設定頁填寫各製程段時程");
   if (grabDueBtn) {
     grabDueBtn.style.display = showGrab ? "" : "none";
     grabDueBtn.disabled = !defs.due;
     grabDueBtn.style.opacity = defs.due ? "1" : "0.55";
     grabDueBtn.textContent = defs.due
-      ? ("套用預設完成 " + displayDateSlash(defs.due))
-      : "套用預設完成（設定頁未填）";
-    grabDueBtn.title = defTip;
+      ? ("套用預設完成 " + displayDateSlash(defs.due) + (defs.fromAssessment ? "（評估階段）" : ""))
+      : "套用預設完成（評估階段亦未填）";
+    grabDueBtn.title = srcLabel;
   }
   if (grabStartBtn) {
     grabStartBtn.style.display = showGrab ? "" : "none";
     grabStartBtn.disabled = !defs.start;
     grabStartBtn.style.opacity = defs.start ? "1" : "0.55";
     grabStartBtn.textContent = defs.start
-      ? ("套用預設開始 " + displayDateSlash(defs.start))
-      : "套用預設開始（設定頁未填）";
-    grabStartBtn.title = defTip;
+      ? ("套用預設開始 " + displayDateSlash(defs.start) + (defs.fromAssessment ? "（評估階段）" : ""))
+      : "套用預設開始（評估階段亦未填）";
+    grabStartBtn.title = srcLabel;
   }
   if (grabBothBtn) {
     grabBothBtn.style.display = showGrab ? "" : "none";
@@ -5084,9 +5146,9 @@ function showDateCtxMenu(x, y, input) {
     if (defs.start) parts.push("始 " + displayDateSlash(defs.start));
     if (defs.due) parts.push("完 " + displayDateSlash(defs.due));
     grabBothBtn.textContent = parts.length
-      ? ("套用預設開始＋完成（" + parts.join("／") + "）")
-      : "套用預設開始＋完成（設定頁未填）";
-    grabBothBtn.title = defTip;
+      ? ("套用預設開始＋完成（" + parts.join("／") + ")" + (defs.fromAssessment ? "（評估階段）" : ""))
+      : "套用預設開始＋完成（評估階段亦未填）";
+    grabBothBtn.title = srcLabel;
   }
   if (pasteBtn) {
     pasteBtn.disabled = false;
@@ -5191,7 +5253,7 @@ function applySegStageDefaultsToItemInput(input, mode) {
   if (!input) return false;
   const defs = getSegStageDefaultDates(state.stage);
   if (!defs.start && !defs.due) {
-    toast("設定頁尚未填寫此製程段×階段的預設時程");
+    toast("設定頁此製程段的目前階段與「評估階段」皆未填時程");
     return false;
   }
   ensureItemDatesOpen(input);
@@ -5224,7 +5286,10 @@ function applySegStageDefaultsToItemInput(input, mode) {
       btn.classList.toggle("empty", !dueText);
     });
   }
-  toast("已套用預設（" + (defs.seg || "") + "×" + (defs.stageName || "") + "）：" + msg.join("、"));
+  const via = defs.fromAssessment
+    ? (defs.seg + "×" + (defs.sourceStageName || "評估階段") + "（目前階段未填）")
+    : (defs.seg + "×" + (defs.stageName || ""));
+  toast("已套用預設（" + via + "）：" + msg.join("、"));
   return true;
 }
 
