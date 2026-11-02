@@ -519,6 +519,23 @@
     color: #3d5a73;
     white-space: nowrap;
   }
+  .items-stage-cell {
+    cursor: pointer; vertical-align: top; transition: background .12s ease;
+  }
+  .items-stage-cell:hover { background: #eef5fb; }
+  .items-stage-cell.on {
+    background: #e7f0f7; outline: 2px solid #1d4f91; outline-offset: -2px;
+  }
+  .items-stage-cell .items-expand-hint {
+    margin-top: 4px; font-size: 11px; color: #1d4f91; font-weight: 600;
+  }
+  .items-stage-off { color: var(--muted); font-size: 12px; }
+  .items-expand-row > td {
+    background: #f7fafc; padding: 12px 10px 16px; border-top: none;
+  }
+  .items-expand-row .detail.card {
+    margin: 0; box-shadow: none; border: 1px solid var(--line);
+  }
   .ov-eq-table .ov-stage-range.empty {
     color: var(--muted);
     font-weight: 500;
@@ -1592,7 +1609,7 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=76"></script>
+<script src="google_config.js?v=77"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
@@ -1608,7 +1625,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1619,7 +1636,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 76;
+const PAGE_BUILD = 77;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -4807,12 +4824,36 @@ function selectEquipment(ei, opts) {
   state.openDates = null;
   ensureActiveStageForEq(DATA.equipment[state.eq]);
   const preferDetail = !opts || opts.detailOnly !== false;
-  if (preferDetail && state.tab === "items" && document.querySelector("#items .eq-list, #items .m-eq-scroll")) {
-    refreshItemsDetailOnly(scrollSave);
+  if (preferDetail && state.tab === "items") {
+    state.itemsExpand = true;
+    if (document.querySelector("#items .items-matrix, #items .detail-host, #items .detail")) {
+      renderItems();
+      pinEqListScroll(scrollSave);
+      return;
+    }
+  }
+  state._eqListScroll = scrollSave;
+  render();
+  pinEqListScroll(scrollSave);
+}
+
+/** 點總表階段格：展開／收合該設備該階段細項 */
+function toggleItemsStageExpand(ei, si) {
+  const eqIdx = Number(ei);
+  const stageIdx = Number(si);
+  if (state.itemsExpand && state.eq === eqIdx && state.stage === stageIdx) {
+    state.itemsExpand = false;
   } else {
-    state._eqListScroll = scrollSave;
-    render();
-    pinEqListScroll(scrollSave);
+    state.eq = eqIdx;
+    state.stage = stageIdx;
+    state.itemsExpand = true;
+    state.openRemark = null;
+    state.openDates = null;
+  }
+  renderItems();
+  const row = document.querySelector(`#items [data-items-row-eq="${state.eq}"]`);
+  if (row && row.scrollIntoView) {
+    try { row.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (e) {}
   }
 }
 
@@ -4961,25 +5002,55 @@ function renderItems() {
   }
   if (!list.some(eq => DATA.equipment.indexOf(eq) === state.eq)) {
     state.eq = DATA.equipment.indexOf(list[0]);
+    state.itemsExpand = false;
   }
-  const eq = DATA.equipment[state.eq];
-  ensureActiveStageForEq(eq);
-  const buttons = list.map(item => {
-    const i = DATA.equipment.indexOf(item);
-    const si = isStageOn(item, state.stage) ? state.stage : (enabledStageIndexes(item)[0] ?? 0);
-    const r = ratioOf((item.stages[si] && item.stages[si].items) || []);
-    return `<button type="button" data-eq="${i}" class="${i === state.eq ? "on" : ""}" tabindex="-1">
-      <div class="name">${item.idx} ${escapeHtml(item.name)}</div>
-      <div class="sub">${item.seg}　${pctText(r)}　${escapeHtml(item.owner)}</div>
-    </button>`;
+  const stageHeads = overviewStageHeadHtml();
+  const stageCount = (DATA.stages || []).length;
+  const colN = 5 + stageCount;
+  const rows = list.map(eq => {
+    const ei = DATA.equipment.indexOf(eq);
+    const cells = (eq.stages || []).map((st, si) => {
+      if (!isStageOn(eq, si)) {
+        return `<td class="items-stage-off" style="min-width:92px"><div class="note">不適用</div></td>`;
+      }
+      const r = ratioOf(st.items);
+      const on = !!(state.itemsExpand && state.eq === ei && state.stage === si);
+      return `<td class="items-stage-cell ${on ? "on" : ""}" style="min-width:100px" data-items-eq="${ei}" data-items-stage="${si}" title="點擊展開／收合細項清單">
+        <div class="pct ${pctClass(r)}">${pctText(r)}</div>
+        ${barHtml(r)}
+        <div class="note">${escapeHtml(st.due || "")}</div>
+        <div class="items-expand-hint">${on ? "▼ 收合細項" : "▶ 展開細項"}</div>
+      </td>`;
+    }).join("");
+    const overall = ratioOf(activeItemsOf(eq));
+    let html = `<tr class="items-eq-row" data-items-row-eq="${ei}">
+      <td>${escapeHtml(eq.idx || "")}</td>
+      <td>${tag(eq.seg)}</td>
+      <td>${escapeHtml(eq.name || "")}</td>
+      ${cells}
+      <td class="pct ${pctClass(overall)}">${pctText(overall)}</td>
+      <td>${delayCount(eq)}</td>
+    </tr>`;
+    if (state.itemsExpand && state.eq === ei) {
+      const detailEq = DATA.equipment[state.eq];
+      if (detailEq) {
+        ensureActiveStageForEq(detailEq);
+        html += `<tr class="items-expand-row" data-items-expand-eq="${ei}">
+          <td colspan="${colN}"><div class="detail-host">${buildItemsDetailHtml(detailEq)}</div></td>
+        </tr>`;
+      }
+    }
+    return html;
   }).join("");
+
   document.getElementById("items").innerHTML = `
     ${toolbar(`<label><input type="checkbox" id="onlyHigh" ${state.onlyHigh ? "checked" : ""}> 只看高急迫</label>`)}
-    <div class="m-eq-scroll m-only">${buttons}</div>
-    <div class="split">
-      <div class="eq-list d-only">${buttons}</div>
-      <div class="detail-host">${buildItemsDetailHtml(eq)}</div>
-    </div>`;
+    <h2 class="section-title">工作項目清單（總表展開）</h2>
+    <p class="note">點各階段儲存格（完成率）可展開該設備該階段的待完成事項；再點一次可收合。展開後可改完成率／急迫性／狀態／照片。</p>
+    <div class="scroll"><table class="ov-eq-table items-matrix">
+      <thead><tr><th>項次</th><th>製程段</th><th>設備名稱</th>${stageHeads}<th>整體</th><th>延誤數</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="${colN}">沒有符合的設備</td></tr>`}</tbody>
+    </table></div>`;
   pinEqListScroll(scrollSave);
 }
 
@@ -7147,7 +7218,13 @@ document.body.addEventListener("click", ev => {
     state.eq = Number(mapEq.dataset.mapEq);
     state.tab = "items";
     state.stage = 0;
+    state.itemsExpand = true;
     render();
+    return;
+  }
+  const itemsCell = ev.target.closest("#items [data-items-eq][data-items-stage]");
+  if (itemsCell) {
+    toggleItemsStageExpand(itemsCell.dataset.itemsEq, itemsCell.dataset.itemsStage);
     return;
   }
   const seg = ev.target.closest("[data-seg]");
@@ -7156,18 +7233,22 @@ document.body.addEventListener("click", ev => {
   if (stage) {
     const scrollSave = captureEqListScroll();
     state.stage = Number(stage.dataset.stage);
+    state.itemsExpand = true;
     state.openRemark = null;
     state.openDates = null;
+    if (state.tab === "items" && document.querySelector("#items .items-matrix")) {
+      renderItems();
+      return;
+    }
     if (!refreshEqDetailPanel(scrollSave)) {
       state._eqListScroll = scrollSave;
-    render();
+      render();
       pinEqListScroll(scrollSave);
     }
     return;
   }
   const eq = ev.target.closest("[data-eq]");
   if (eq) {
-    // 清單頁點左側設備：只刷新右側，並鎖住左側捲動
     selectEquipment(eq.dataset.eq);
     return;
   }
