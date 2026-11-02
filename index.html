@@ -537,11 +537,20 @@
     margin: 0; box-shadow: none; border: 1px solid var(--line);
   }
   .prog-log-box {
-    margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line);
+    margin: 10px 0 12px; padding: 12px; border: 2px solid #1d4f91; border-radius: 10px;
+    background: #f0f7ff;
+  }
+  .prog-log-box > .prog-log-title {
+    display: block; font-size: 14px; font-weight: 800; color: #1d4f91; margin: 0 0 8px;
   }
   .prog-log-box > label {
     display: block; font-size: 12px; font-weight: 700; color: #334155; margin: 8px 0 4px;
   }
+  .btn-prog {
+    border: 1px solid #1d4f91; background: #1d4f91; color: #fff; border-radius: 8px;
+    padding: 4px 8px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
+  }
+  .btn-prog:hover { background: #163a6b; }
   .prog-log-box textarea {
     width: 100%; box-sizing: border-box; min-height: 56px; padding: 8px 10px;
     border: 1px solid var(--line); border-radius: 8px; font: inherit; resize: vertical;
@@ -1640,7 +1649,7 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=78"></script>
+<script src="google_config.js?v=79"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
@@ -1667,7 +1676,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 78;
+const PAGE_BUILD = 79;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -4749,8 +4758,9 @@ function progressLogHtml(it, idx) {
     : `<p class="note" style="margin:0">尚無進度更新紀錄</p>`;
   const cur = ((Number(it.pct) || 0) * 100).toFixed(1);
   return `<div class="prog-log-box" data-prog-log="${idx}">
-    <label>登記今日進度</label>
-    <textarea data-prog-work="${idx}" rows="2" placeholder="今日做了什麼事…"></textarea>
+    <div class="prog-log-title">📝 在這裡寫今日進度</div>
+    <label>今日做了什麼事</label>
+    <textarea data-prog-work="${idx}" rows="2" placeholder="例如：電氣插座確認完成一半、配線已定位…"></textarea>
     <div class="prog-log-row">
       <label>更新後完成率％</label>
       <input type="number" min="0" max="100" step="0.1" value="${cur}" data-prog-pct="${idx}">
@@ -5004,16 +5014,19 @@ function buildItemsDetailHtml(eq) {
       </td>
       <td><select class="s-${it.status}" data-field="status">${optionHtml(STATUS_OPTS, it.status || "未開始")}</select></td>
       <td>${photoBtnHtml(it, idx)}</td>
-      <td><button type="button" class="btn-del icon-only" data-del-item="${idx}" title="刪除項目" aria-label="刪除項目">🗑</button></td>
+      <td>
+        <button type="button" class="btn-prog" data-open-prog="${idx}" title="登記今日進度">今日進度</button>
+        <button type="button" class="btn-del icon-only" data-del-item="${idx}" title="刪除項目" aria-label="刪除項目">🗑</button>
+      </td>
     </tr>
     <tr class="remark-row ${open ? "" : "hidden"}" data-remark-for="${idx}">
       <td colspan="8">
         <div class="remark-box">
+          ${progressLogHtml(it, idx)}
           <label>事項名稱</label>
           <input type="text" data-field="item" data-item-idx="${idx}" value="${escapeAttr(it.item || "")}">
-          <label>備註說明</label>
-          <textarea data-field="note" data-item-idx="${idx}" placeholder="填寫此細項的備註說明…">${escapeHtml(it.note || "")}</textarea>
-          ${progressLogHtml(it, idx)}
+          <label>備註說明（固定備註，非每日進度）</label>
+          <textarea data-field="note" data-item-idx="${idx}" placeholder="固定備註說明…">${escapeHtml(it.note || "")}</textarea>
           <label>雲端照片</label>
           ${photoGalleryHtml(it, idx) || '<p class="note" style="margin:0">尚無照片，按「上傳照片」新增</p>'}
         </div>
@@ -5038,12 +5051,13 @@ function buildItemsDetailHtml(eq) {
       </div></div>
       <div class="m-field"><label>狀態</label><select class="s-${it.status}" data-field="status">${optionHtml(STATUS_OPTS, it.status || "未開始")}</select></div>
       <div class="m-field"><label>照片</label>${photoBtnHtml(it, idx)}</div>
+      <div class="m-field"><button type="button" class="btn-prog" data-open-prog="${idx}">📝 今日進度</button></div>
       <div class="remark-box ${open ? "" : "hidden"}" data-remark-for="${idx}">
+        ${progressLogHtml(it, idx)}
         <label>事項名稱</label>
         <input type="text" data-field="item" data-item-idx="${idx}" value="${escapeAttr(it.item || "")}">
-        <label>備註說明</label>
-        <textarea data-field="note" data-item-idx="${idx}" placeholder="填寫此細項的備註說明…">${escapeHtml(it.note || "")}</textarea>
-        ${progressLogHtml(it, idx)}
+        <label>備註說明（固定備註，非每日進度）</label>
+        <textarea data-field="note" data-item-idx="${idx}" placeholder="固定備註說明…">${escapeHtml(it.note || "")}</textarea>
         <label>雲端照片</label>
         ${photoGalleryHtml(it, idx) || '<p class="note" style="margin:0">尚無照片</p>'}
       </div>
@@ -7335,6 +7349,25 @@ document.body.addEventListener("click", ev => {
   const itemsCell = ev.target.closest("#items [data-items-eq][data-items-stage]");
   if (itemsCell) {
     toggleItemsStageExpand(itemsCell.dataset.itemsEq, itemsCell.dataset.itemsStage);
+    return;
+  }
+  const openProg = ev.target.closest("[data-open-prog]");
+  if (openProg) {
+    const idx = Number(openProg.dataset.openProg);
+    state.openRemark = idx;
+    state.openDates = null;
+    state.itemsExpand = true;
+    if (state.tab === "items" && document.querySelector("#items .items-matrix, #items .detail-host")) {
+      renderItems();
+    } else {
+      render();
+    }
+    setTimeout(function () {
+      const ta = document.querySelector(`[data-prog-work="${idx}"]`);
+      if (ta) {
+        try { ta.focus(); ta.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) {}
+      }
+    }, 50);
     return;
   }
   const progSubmit = ev.target.closest("[data-prog-submit]");
