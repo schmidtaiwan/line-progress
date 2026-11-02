@@ -973,6 +973,10 @@
         list.sort(function (a, b) {
           return String(a.name || "").localeCompare(String(b.name || ""), "zh-Hant");
         });
+        // Sheets-only：掃描結果交呼叫端寫入試算表，這裡不再寫 projects_index.json
+        if (isSheetsMode() && cfg.indexSheetsOnly !== false) {
+          return list;
+        }
         const payload = {
           savedAt: new Date().toISOString(),
           syncedFromFolders: true,
@@ -1114,23 +1118,43 @@
     });
   }
 
+  function trashIndexJsonInRoot(rootId) {
+    const safe = "projects_index.json".replace(/'/g, "\\'");
+    const q = "name='" + safe + "' and trashed=false" + parentQueryClause(rootId);
+    return driveListByQuery(q).then(function (files) {
+      if (!files.length) return;
+      return Promise.all(files.map(function (f) { return trashDriveFile(f.id); }));
+    }).catch(function (e) {
+      console.warn("清除舊 projects_index.json 失敗", e);
+    });
+  }
+
   function persistIndexList(list, buildId) {
     const projects = (list || []).map(normalizeProjectRecord).filter(function (p) { return p && p.name; });
-    // Sheets 寫失敗時仍回傳清單給 UI，並保留／寫回 JSON
+    const sheetsOnly = isSheetsMode() && cfg.indexSheetsOnly !== false;
     return ensureProjectsRootId().then(function (rootId) {
-      const backup = putJsonInFolder(rootId, "projects_index.json", {
-        savedAt: new Date().toISOString(),
-        forceBuildId: buildId || undefined,
-        projects: projects
-      }).catch(function (e) {
-        console.warn("備份 projects_index.json 失敗", e);
-      });
-      if (!isSheetsMode()) return backup.then(function () { return projects; });
+      if (!isSheetsMode()) {
+        return putJsonInFolder(rootId, "projects_index.json", {
+          savedAt: new Date().toISOString(),
+          forceBuildId: buildId || undefined,
+          projects: projects
+        }).then(function () { return projects; });
+      }
+      // ★ 索引只寫 Sheets；成功後可清掉舊 projects_index.json
       return writeIndexToSheets(projects).then(function () {
-        return backup.then(function () { return projects; });
+        if (sheetsOnly && cfg.trashIndexJsonAfterSheetsWrite !== false) {
+          return trashIndexJsonInRoot(rootId).then(function () { return projects; });
+        }
+        return projects;
       }).catch(function (err) {
-        console.warn("寫入 Sheets 索引失敗，改用 JSON 清單", err);
-        return backup.then(function () { return projects; });
+        const msg = String((err && err.message) || err || "");
+        if (/403|Sheets API has not been used|accessNotConfigured/i.test(msg)) {
+          throw new Error(
+            "寫入專案索引試算表失敗（請在 GCP 啟用 Google Sheets API，並重新登入授權）。" +
+            (msg ? "\n" + msg : "")
+          );
+        }
+        throw err;
       });
     });
   }
