@@ -399,11 +399,17 @@
       return findSpreadsheetInFolder(rootId, indexSpreadsheetName()).then(function (id) {
         if (id) {
           cachedIndexSpreadsheetId = id;
-          return id;
+          return ensureSheetTabs(id, [indexSheetName()]).catch(function (e) {
+            console.warn("索引試算表分頁準備失敗", e);
+            return id;
+          }).then(function () { return id; });
         }
         return createSpreadsheetInFolder(rootId, indexSpreadsheetName()).then(function (nid) {
           cachedIndexSpreadsheetId = nid;
-          return ensureSheetTabs(nid, [indexSheetName()]).then(function () { return nid; });
+          return ensureSheetTabs(nid, [indexSheetName()]).catch(function (e) {
+            console.warn("索引試算表分頁準備失敗", e);
+            return nid;
+          }).then(function () { return nid; });
         });
       });
     });
@@ -939,33 +945,123 @@
       });
   }
 
-  function migrateIndexJsonToSheets(rootId, buildId) {
+  /** 合併多來源專案清單（後寫入覆蓋同 id／同名） */
+  function mergeProjectLists() {
+    const byKey = Object.create(null);
+    const out = [];
+    function addAll(arr) {
+      (arr || []).forEach(function (raw) {
+        const p = normalizeProjectRecord(raw);
+        if (!p || !p.name) return;
+        const k = normFolderKey(p.name) || p.id;
+        if (byKey[k]) {
+          const prev = byKey[k];
+          byKey[k] = normalizeProjectRecord(Object.assign({}, prev, p, {
+            spreadsheetId: p.spreadsheetId || prev.spreadsheetId,
+            folderId: p.folderId || prev.folderId,
+            legacyFallback: p.legacyFallback || prev.legacyFallback
+          }));
+          const idx = out.indexOf(prev);
+          if (idx >= 0) out[idx] = byKey[k];
+        } else {
+          byKey[k] = p;
+          out.push(p);
+        }
+      });
+    }
+    for (let i = 0; i < arguments.length; i++) addAll(arguments[i]);
+    return out;
+  }
+
+  /** 從 JSON／資料夾／設定提示組出專案清單（不寫空清單蓋掉舊 JSON） */
+  function recoverProjectsList(rootId, buildId) {
+    const forced = forceIndexHints();
     return fetchJsonInFolder(rootId, "projects_index.json").then(function (data) {
-      let list = (data && Array.isArray(data.projects))
+      const fromJson = (data && Array.isArray(data.projects))
         ? data.projects.map(normalizeProjectRecord).filter(function (p) { return p && p.name; })
         : [];
-      if (list.length) return writeIndexToSheets(list).then(function () { return list; });
-
-      const forced = forceIndexHints();
-      return syncProjectsIndexFromDrive(rootId, forced, {
-        forceBuildId: buildId,
-        seedMissing: false
-      }).then(function (fromFolders) {
-        if (fromFolders && fromFolders.length) {
-          return writeIndexToSheets(fromFolders).then(function () { return fromFolders; });
-        }
-        return migrateIntoSharedRootIfNeeded(rootId, forced).then(function (migrated) {
-          return syncProjectsIndexFromDrive(rootId, migrated || forced, {
-            forceBuildId: buildId,
-            seedMissing: false
-          }).then(function (again) {
-            const fallback = (again && again.length)
-              ? again
-              : defaultProjectsList().map(normalizeProjectRecord);
-            return writeIndexToSheets(fallback).then(function () { return fallback; });
+      // 只掃描資料夾，不要在這裡 putJson（避免空結果蓋掉舊 index）
+      return listChildFolders(rootId, { bypassCache: true }).then(function (folders) {
+        const fromFolders = [];
+        const groups = {};
+        (folders || []).forEach(function (f) {
+          const k = normFolderKey(f.name);
+          if (!k) return;
+          (groups[k] = groups[k] || []).push(f);
+        });
+        const keys = Object.keys(groups);
+        let chain = Promise.resolve();
+        keys.forEach(function (k) {
+          chain = chain.then(function () {
+            return consolidateFolderGroup(groups[k]).then(function (best) {
+              if (!best) return;
+              const hint = forced.find(function (h) {
+                return normFolderKey(h.name) === k;
+              }) || {};
+              fromFolders.push(normalizeProjectRecord({
+                id: hint.id || ("p-" + String(best.id).slice(0, 10)),
+                name: String(hint.name || best.name || k).trim() || k,
+                arch: hint.arch || "unified",
+                folderId: best.id,
+                legacyFallback: !!hint.legacyFallback,
+                legacyFolderPath: hint.legacyFolderPath || "",
+                legacyFileName: hint.legacyFileName || "",
+                createdAt: hint.createdAt || ""
+              }));
+            });
           });
         });
+        return chain.then(function () {
+          let list = mergeProjectLists(fromJson, fromFolders, forced);
+          if (!list.length) {
+            return migrateIntoSharedRootIfNeeded(rootId, forced).then(function () {
+              return listChildFolders(rootId, { bypassCache: true }).then(function (folders2) {
+                (folders2 || []).forEach(function (f) {
+                  const name = String(f.name || "").trim();
+                  if (!name) return;
+                  list.push(normalizeProjectRecord({
+                    id: "p-" + String(f.id).slice(0, 10),
+                    name: name,
+                    folderId: f.id,
+                    arch: "unified"
+                  }));
+                });
+                list = mergeProjectLists(list, forced);
+                if (!list.length) list = defaultProjectsList().map(normalizeProjectRecord);
+                return list;
+              });
+            });
+          }
+          return list;
+        });
       });
+    });
+  }
+
+  function persistIndexList(list, buildId) {
+    const projects = (list || []).map(normalizeProjectRecord).filter(function (p) { return p && p.name; });
+    // Sheets 寫失敗時仍回傳清單給 UI，並保留／寫回 JSON
+    return ensureProjectsRootId().then(function (rootId) {
+      const backup = putJsonInFolder(rootId, "projects_index.json", {
+        savedAt: new Date().toISOString(),
+        forceBuildId: buildId || undefined,
+        projects: projects
+      }).catch(function (e) {
+        console.warn("備份 projects_index.json 失敗", e);
+      });
+      if (!isSheetsMode()) return backup.then(function () { return projects; });
+      return writeIndexToSheets(projects).then(function () {
+        return backup.then(function () { return projects; });
+      }).catch(function (err) {
+        console.warn("寫入 Sheets 索引失敗，改用 JSON 清單", err);
+        return backup.then(function () { return projects; });
+      });
+    });
+  }
+
+  function migrateIndexJsonToSheets(rootId, buildId) {
+    return recoverProjectsList(rootId, buildId).then(function (list) {
+      return persistIndexList(list, buildId);
     });
   }
 
@@ -982,12 +1078,17 @@
             if (isSheetsMode()) {
               return readIndexFromSheets().then(function (idx) {
                 let list = (idx.projects || []).filter(function (p) { return p && p.name; });
-                if (list.length) {
-                  if (buildId && idx.forceBuildId !== buildId) {
-                    return writeIndexToSheets(list).then(function () { return list; });
-                  }
-                  return list;
+                const buildMismatch = !!(buildId && idx.forceBuildId !== buildId);
+                // 空清單或強制版次變更 → 從舊 JSON／資料夾／設定提示還原
+                if (!list.length || buildMismatch) {
+                  return recoverProjectsList(rootId, buildId).then(function (recovered) {
+                    const merged = mergeProjectLists(list, recovered);
+                    return persistIndexList(merged, buildId);
+                  });
                 }
+                return list;
+              }).catch(function (err) {
+                console.warn("讀 Sheets 專案索引失敗，改從 JSON／資料夾還原", err);
                 return migrateIndexJsonToSheets(rootId, buildId);
               });
             }
@@ -2421,6 +2522,21 @@
     setActiveProject: setActiveProject,
     loadProjectsIndex: loadProjectsIndex,
     saveProjectsIndex: saveProjectsIndex,
+    rebuildProjectsIndex: function () {
+      cachedIndexSpreadsheetId = "";
+      const buildId = String(cfg.forceIndexBuildId || "").trim();
+      return ensureInit()
+        .then(function () {
+          if (!state.account) return login({ prompt: "consent" });
+        })
+        .then(function () {
+          return withScopeRetry(function () {
+            return ensureProjectsRootId().then(function (rootId) {
+              return migrateIndexJsonToSheets(rootId, buildId);
+            });
+          });
+        });
+    },
     createProject: createProject,
     deleteProject: deleteProject,
     duplicateProject: duplicateProject,

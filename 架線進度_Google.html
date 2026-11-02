@@ -1592,12 +1592,12 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=70"></script>
+<script src="google_config.js?v=71"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
-<script src="line_sheets_codec.js?v=70"></script>
-<script src="line_google_sync.js?v=70"></script>
+<script src="line_sheets_codec.js?v=71"></script>
+<script src="line_google_sync.js?v=71"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 let STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1619,7 +1619,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 70;
+const PAGE_BUILD = 71;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {

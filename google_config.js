@@ -40,8 +40,8 @@ window.GOOGLE_CONFIG = {
   sheetPhotos: "_photos",
 
   // 一次性：依雲端資料夾重寫 projects_index（寫入後帶 forceBuildId，同 ID 不重跑）
-  // 20261102-sheets1：改 Sheets 為 SoT；索引改試算表
-  forceIndexBuildId: "20261102-sheets1",
+  // 20261102-sheets2：空 Sheets 索引時強制從 JSON／資料夾／forceIndexProjects 還原
+  forceIndexBuildId: "20261102-sheets2",
   forceIndexProjects: [
     { id: "p-dip-auto", name: "DIP自動換線", arch: "unified" },
     { id: "p-r01-mep", name: "R01機電工程", arch: "unified" },
