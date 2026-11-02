@@ -293,6 +293,20 @@
     margin-bottom: 8px;
   }
   .report-updates-head h2 { margin: 0; font-size: 17px; }
+  .report-updates-filters {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  }
+  .report-custom-range {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px;
+    font-size: 13px; color: var(--muted);
+  }
+  .report-custom-range input[type="date"] {
+    padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 13px;
+    background: #fff; color: #16324a;
+  }
+  .report-custom-range.on-custom input[type="date"] {
+    border-color: #1d4f91; box-shadow: 0 0 0 1px rgba(29, 79, 145, 0.2);
+  }
   .report-updates .work-cell {
     max-width: 420px; white-space: pre-wrap; line-height: 1.45; font-size: 13px;
   }
@@ -1673,7 +1687,7 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=82"></script>
+<script src="google_config.js?v=83"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
@@ -1689,7 +1703,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1700,7 +1714,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 82;
+const PAGE_BUILD = 83;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -4526,7 +4540,23 @@ function renderHierarchySettings() {
     </div>`;
 }
 
-/** 報表：今日／本週（週一～日）／本月 的時間區間 */
+function todayIsoDate() {
+  const n = new Date();
+  const p = function (x) { return String(x).padStart(2, "0"); };
+  return n.getFullYear() + "-" + p(n.getMonth() + 1) + "-" + p(n.getDate());
+}
+
+function ensureReportCustomDates() {
+  if (!state.reportCustomFrom) state.reportCustomFrom = todayIsoDate();
+  if (!state.reportCustomTo) state.reportCustomTo = state.reportCustomFrom || todayIsoDate();
+  if (state.reportCustomFrom > state.reportCustomTo) {
+    const tmp = state.reportCustomFrom;
+    state.reportCustomFrom = state.reportCustomTo;
+    state.reportCustomTo = tmp;
+  }
+}
+
+/** 報表：今日／本週（週一～日）／本月／自選區間 */
 function reportPeriodRange(period) {
   const now = new Date();
   const y = now.getFullYear();
@@ -4534,7 +4564,13 @@ function reportPeriodRange(period) {
   const d = now.getDate();
   let start;
   let end;
-  if (period === "month") {
+  if (period === "custom") {
+    ensureReportCustomDates();
+    const fromIso = normalizeDateValue(state.reportCustomFrom) || todayIsoDate();
+    const toIso = normalizeDateValue(state.reportCustomTo) || fromIso;
+    start = new Date(fromIso + "T00:00:00");
+    end = new Date(toIso + "T23:59:59.999");
+  } else if (period === "month") {
     start = new Date(y, m, 1);
     end = new Date(y, m + 1, 0, 23, 59, 59, 999);
   } else if (period === "week") {
@@ -4606,11 +4642,15 @@ function buildProgressUpdatesHtml(opts) {
   const periods = [
     { id: "today", label: "今日" },
     { id: "week", label: "本週" },
-    { id: "month", label: "本月" }
+    { id: "month", label: "本月" },
+    { id: "custom", label: "自選區間" }
   ];
   const chips = periods.map(function (p) {
     return `<button type="button" data-report-period="${p.id}" class="${period === p.id ? "on" : ""}">${p.label}</button>`;
   }).join("");
+  if (period === "custom") ensureReportCustomDates();
+  const customFrom = escapeAttr(state.reportCustomFrom || todayIsoDate());
+  const customTo = escapeAttr(state.reportCustomTo || state.reportCustomFrom || todayIsoDate());
   const rangeTxt = fmtReportDay(pack.range.startDate) + " ~ " + fmtReportDay(pack.range.endDate);
   const showProj = !!opts.overview;
   const colSpan = showProj ? 8 : 7;
@@ -4645,9 +4685,17 @@ function buildProgressUpdatesHtml(opts) {
   return `<section class="report-updates">
     <div class="report-updates-head">
       <h2>進度更新</h2>
-      <div class="chips">${chips}</div>
+      <div class="report-updates-filters">
+        <div class="chips">${chips}</div>
+        <div class="report-custom-range${period === "custom" ? " on-custom" : ""}">
+          <span>自選</span>
+          <input type="date" data-report-custom="from" value="${customFrom}" title="開始日期">
+          <span>～</span>
+          <input type="date" data-report-custom="to" value="${customTo}" title="結束日期">
+        </div>
+      </div>
     </div>
-    <p class="note">區間 ${rangeTxt}　共 ${pack.rows.length} 筆　｜　可切換今日／本週／本月，檢視登記時的更新內容說明</p>
+    <p class="note">區間 ${rangeTxt}　共 ${pack.rows.length} 筆　｜　可切換今日／本週／本月／自選區間，檢視登記時的更新內容說明</p>
     <div class="m-eq-cards">${cards}</div>
     <div class="scroll desktop-table"><table>
       <thead><tr>
@@ -7299,6 +7347,7 @@ document.body.addEventListener("click", ev => {
   const reportPeriodBtn = ev.target.closest("[data-report-period]");
   if (reportPeriodBtn) {
     state.reportPeriod = reportPeriodBtn.dataset.reportPeriod || "today";
+    if (state.reportPeriod === "custom") ensureReportCustomDates();
     if (state.tab === "weekly") renderWeekly();
     else render();
     return;
@@ -8061,6 +8110,18 @@ document.body.addEventListener("change", async (ev) => {
 document.body.addEventListener("change", ev => {
 
   const el = ev.target;
+  const reportCustom = el.closest("[data-report-custom]");
+  if (reportCustom) {
+    const which = reportCustom.dataset.reportCustom;
+    const iso = normalizeDateValue(reportCustom.value) || todayIsoDate();
+    if (which === "from") state.reportCustomFrom = iso;
+    else state.reportCustomTo = iso;
+    state.reportPeriod = "custom";
+    ensureReportCustomDates();
+    if (state.tab === "weekly") renderWeekly();
+    else render();
+    return;
+  }
   if (el.id === "onlyHigh") {
     state.onlyHigh = el.checked;
     render();
