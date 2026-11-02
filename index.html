@@ -506,6 +506,23 @@
   .tag.組裝段 { background: var(--assy); }
   .tag.測試段 { background: var(--test); }
   .section-title { margin: 18px 0 8px; font-size: 17px; }
+  .ov-eq-table .ov-stage-th {
+    min-width: 108px;
+    vertical-align: bottom;
+    line-height: 1.25;
+  }
+  .ov-eq-table .ov-stage-name { font-weight: 700; }
+  .ov-eq-table .ov-stage-range {
+    margin-top: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #3d5a73;
+    white-space: nowrap;
+  }
+  .ov-eq-table .ov-stage-range.empty {
+    color: var(--muted);
+    font-weight: 500;
+  }
   .note { color: var(--muted); font-size: 13px; margin-top: 10px; }
   .split { display: grid; grid-template-columns: 280px 1fr; gap: 12px; align-items: start; }
   .eq-list {
@@ -1565,7 +1582,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 54;
+const PAGE_BUILD = 55;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -3927,20 +3944,34 @@ function buildEquipmentMasterHtml() {
     <p class="note">同一列可改主檔並勾選適用階段（預設全選，至少保留一個）。右鍵可複製／貼上設備。完成率請在「工作項目清單」更新。</p>`;
 }
 
+/** 總覽表頭：階段名稱＋設定頁該製程段×階段的預計開始～完成 */
+function overviewStageHeadHtml() {
+  const segs = state.seg === "全部"
+    ? Array.from(new Set((visibleEq() || []).map(eq => eq.seg).filter(Boolean)))
+    : [state.seg];
+  const useSegs = segs.length ? segs : ((DATA.segOrder || []).slice());
+  return (DATA.stages || []).map((s, si) => {
+    const ranges = useSegs.map(seg => {
+      const m = (DATA.milestones || []).find(x => x && x.seg === seg);
+      if (!m) return "";
+      const start = (m.starts && m.starts[si]) || "";
+      const due = (m.dates && m.dates[si]) || "";
+      if (start && due) return String(start) + " ~ " + String(due);
+      return String(due || start || "");
+    }).filter(Boolean);
+    const uniq = Array.from(new Set(ranges));
+    let sub = "";
+    if (uniq.length === 1) sub = uniq[0];
+    else if (uniq.length > 1) sub = "各製程段不同";
+    return `<th class="ov-stage-th">
+      <div class="ov-stage-name">${escapeHtml(s.name || s.mark || "")}</div>
+      ${sub ? `<div class="ov-stage-range" title="${escapeAttr(uniq.join(" ／ "))}">${escapeHtml(sub)}</div>` : `<div class="ov-stage-range empty">未設定</div>`}
+    </th>`;
+  }).join("");
+}
+
 function renderOverview() {
-  const head = DATA.stages.map(s => `<th>${s.name}</th>`).join("");
-  const mileRows = DATA.milestones
-    .filter(m => state.seg === "全部" || m.seg === state.seg)
-    .map(m => {
-      const starts = Array.isArray(m.starts) ? m.starts : [];
-      const cells = (m.dates || []).map((d, i) => {
-        const s = starts[i] || "";
-        if (s && d) return `<td>${escapeHtml(s)} ~ ${escapeHtml(d)}</td>`;
-        return `<td>${escapeHtml(d || s || "-")}</td>`;
-      }).join("");
-      return `<tr><td>${tag(m.seg)}</td>${cells}</tr>`;
-    })
-    .join("");
+  const stageHeads = overviewStageHeadHtml();
   const rows = visibleEq().map(eq => {
     const cells = eq.stages.map((st, si) => {
       if (!isStageOn(eq, si)) {
@@ -3957,14 +3988,14 @@ function renderOverview() {
       <td>${delayCount(eq)}</td>
     </tr>`;
   }).join("");
+  const colN = 5 + (DATA.stages || []).length;
   document.getElementById("overview").innerHTML = `
     ${toolbar("")}
-    <h2 class="section-title">各階段預計完成時間</h2>
-    <table><thead><tr><th>製程段</th>${head}</tr></thead><tbody>${mileRows}</tbody></table>
     <h2 class="section-title">設備完成率與完成時間</h2>
-    <div class="scroll"><table>
-      <thead><tr><th>項次</th><th>製程段</th><th>設備名稱</th>${head}<th>整體</th><th>延誤數</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="10">沒有符合的設備</td></tr>`}</tbody>
+    <p class="note">表頭各階段下方為設定頁「製程段 × 階段」的預計開始～完成時間。</p>
+    <div class="scroll"><table class="ov-eq-table">
+      <thead><tr><th>項次</th><th>製程段</th><th>設備名稱</th>${stageHeads}<th>整體</th><th>延誤數</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="${colN}">沒有符合的設備</td></tr>`}</tbody>
     </table></div>`;
 }
 
