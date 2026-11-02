@@ -1686,7 +1686,7 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=85"></script>
+<script src="google_config.js?v=86"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
@@ -1713,7 +1713,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 85;
+const PAGE_BUILD = 86;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -3802,7 +3802,6 @@ function toolbar(extra) {
     <div class="chips">${segs.map(s => `<button data-seg="${s}" class="${state.seg === s ? "on" : ""}">${s}</button>`).join("")}</div>
     <input type="search" placeholder="搜尋設備、負責人、細項" value="${escapeAttr(state.q)}">
     ${extra || ""}
-    <button type="button" class="btn-save" data-export-xlsx>📗 寫回 Excel</button>
   </div>`;
 }
 
@@ -3812,7 +3811,6 @@ function chipsToolbar(extra) {
     <div class="chips">${segs.map(s => `<button data-seg="${s}" class="${state.seg === s ? "on" : ""}">${s}</button>`).join("")}</div>
     <input type="search" placeholder="搜尋設備、負責人、細項" value="${escapeAttr(state.q)}">
     ${extra || ""}
-    <button type="button" class="btn-save" data-export-xlsx>📗 寫回 Excel</button>
   </div>`;
 }
 
@@ -5515,7 +5513,7 @@ function renderMap() {
 }
 
 function updateFoot() {
-  const flag = state.dirty ? "　｜　有未寫回 Excel 的本機修改" : "";
+  const flag = state.dirty ? "　｜　有未儲存的本機修改" : "";
   const verEl = document.getElementById("pageVer");
   if (verEl) verEl.textContent = "版次 " + PAGE_VERSION;
   document.getElementById("foot").textContent =
