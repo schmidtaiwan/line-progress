@@ -1328,6 +1328,17 @@
   .hier-table tr.hier-remark-row td { background: #f8fafc; text-align: left; }
   .hier-table .item-name-wrap { display: flex; align-items: flex-start; gap: 4px; }
   .hier-table .item-name-wrap input[data-hier-field="name"] { flex: 1; }
+  .hier-table .hier-name-text { flex: 1; font-weight: 600; line-height: 1.35; }
+  .hier-note-view {
+    white-space: pre-wrap;
+    background: #f8fafc;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    min-height: 42px;
+    color: var(--ink);
+    margin-bottom: 8px;
+  }
   .np-mask {
     position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
     display: none; align-items: center; justify-content: center; z-index: 80;
@@ -1432,10 +1443,10 @@
   </div>
   <p id="subtitle"></p>
   <nav class="tabs" id="tabs">
-    <button data-tab="weekly" class="active"><span class="tab-full">架線周報</span><span class="tab-short">周報</span></button>
-    <button data-tab="overview"><span class="tab-full">架線階段進度總覽</span><span class="tab-short">總覽</span></button>
-    <button data-tab="items"><span class="tab-full">架線項目清單管控</span><span class="tab-short">清單</span></button>
-    <button data-tab="map"><span class="tab-full">設備總圖</span><span class="tab-short">總圖</span></button>
+    <button data-tab="weekly" class="active"><span class="tab-full">周報</span><span class="tab-short">周報</span></button>
+    <button data-tab="overview"><span class="tab-full">總覽</span><span class="tab-short">總覽</span></button>
+    <button data-tab="items"><span class="tab-full">清單</span><span class="tab-short">清單</span></button>
+    <button data-tab="map"><span class="tab-full">總圖</span><span class="tab-short">總圖</span></button>
     <button data-tab="settings"><span class="tab-full">⚙ 設定</span><span class="tab-short">⚙設定</span></button>
   </nav>
 </header>
@@ -1551,7 +1562,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 52;
+const PAGE_BUILD = 53;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -3543,16 +3554,21 @@ function hierPhotoBtnHtml(node) {
   </div>`;
 }
 
-function hierPhotoGalleryHtml(node) {
+function hierPhotoGalleryHtml(node, opts) {
+  opts = opts || {};
+  const readOnly = !!opts.readOnly;
   const id = node && node.id;
   const photos = itemPhotos(node);
   if (!photos.length) return "";
   const chips = photos.map((p, pi) => {
     const href = (p && p.webViewLink) || (p && p.id ? ("https://drive.google.com/file/d/" + p.id + "/view") : "#");
     const name = escapeHtml((p && p.name) || ("照片" + (pi + 1)));
+    const del = readOnly
+      ? ""
+      : `<button type="button" class="btn-del" data-hier-del-photo="${escapeAttr(id)}" data-photo-i="${pi}">刪除照片</button>`;
     return `<div class="photo-chip">
       <a href="${escapeAttr(href)}" target="_blank" rel="noopener">${name}</a>
-      <button type="button" class="btn-del" data-hier-del-photo="${escapeAttr(id)}" data-photo-i="${pi}">刪除照片</button>
+      ${del}
     </div>`;
   }).join("");
   return `<div class="photo-gallery" data-hier-photo-gallery="${escapeAttr(id)}">${chips}</div>`;
@@ -3606,124 +3622,135 @@ async function showHierPhotoPreview(nodeId) {
   }
 }
 
-function renderHierarchyWeekly() {
+/** 層級進度表：editable=false 僅顯示；true 可編輯（給「清單」用） */
+function buildHierarchyProgressBlock(opts) {
+  opts = opts || {};
+  const editable = !!opts.editable;
   ensureHierarchyNodes();
   rollupHierarchyPct();
   const nodes = hierOrderedNodes();
   const root = nodes.find(n => n.level === 1) || nodes[0];
   const pct = root ? (Number(root.pct) || 0) : 0;
   const rootId = root ? root.id : "";
+  const colSpan = editable ? 8 : 6;
   const rows = nodes.map((n, i) => {
     const lv = n.level || 1;
     const open = state.openHierRemark === n.id;
     const hasNote = !!(n.note && String(n.note).trim()) || itemPhotos(n).length > 0;
-    const canAdd2 = lv === 1;
-    const canAdd3 = lv === 2;
+    const canAdd2 = editable && lv === 1;
+    const canAdd3 = editable && lv === 2;
     const pctVal = ((Number(n.pct) || 0) * 100).toFixed(1);
     const pctReadonly = (lv < 3 && hierChildren(n.id).length > 0);
-    return `<tr class="hier-l${lv}" data-hier-id="${escapeAttr(n.id)}">
-      <td>${i + 1}</td>
-      <td class="hier-name-cell hier-indent-${lv}">
-        <div class="item-name-wrap">
+    const nameCell = editable
+      ? `<div class="item-name-wrap">
           <button type="button" class="item-fold ${open ? "open" : ""}" data-toggle-hier-remark="${escapeAttr(n.id)}" title="展開／收合備註">${open ? "▼" : "▶"}</button>
           <input type="text" data-hier-field="name" value="${escapeAttr(n.name || "")}" title="點名稱旁三角形可展開備註／照片">
         </div>
-        <button type="button" class="item-name-hit ${hasNote ? "has-note" : ""}" data-toggle-hier-remark="${escapeAttr(n.id)}" style="margin-top:4px;font-size:11px;" title="展開備註／照片">${hasNote ? "有備註／照片 ▾" : "備註／照片 ▾"}</button>
-      </td>
-      <td><input type="number" data-hier-field="days" min="0" step="1" value="${n.days || 0}"></td>
-      <td><input type="number" class="pct-input ${pctClass(n.pct || 0)}" data-hier-field="pct" min="0" max="100" step="0.1" value="${pctVal}" ${pctReadonly ? "title=\"有下層時會依下層重算\"" : ""}></td>
-      <td><input type="text" data-hier-field="start" placeholder="2026/10/19" value="${escapeAttr(n.start || "")}"></td>
-      <td><input type="text" data-hier-field="finish" placeholder="2026/12/16" value="${escapeAttr(n.finish || "")}"></td>
-      <td>${hierPhotoBtnHtml(n)}</td>
-      <td class="hier-actions">
-        ${canAdd2 ? `<button type="button" data-hier-add-child="2" title="新增第2層階段">＋階段</button>` : ""}
-        ${canAdd3 ? `<button type="button" data-hier-add-child="3" title="新增第3層工作項">＋工作項</button>` : ""}
-        ${lv > 1 ? `<button type="button" class="danger" data-hier-del title="刪除">刪</button>` : ""}
-      </td>
-    </tr>
-    <tr class="hier-remark-row remark-row ${open ? "" : "hidden"}" data-hier-remark-for="${escapeAttr(n.id)}">
-      <td colspan="8">
-        <div class="remark-box">
-          <label>備註說明</label>
+        <button type="button" class="item-name-hit ${hasNote ? "has-note" : ""}" data-toggle-hier-remark="${escapeAttr(n.id)}" style="margin-top:4px;font-size:11px;" title="展開備註／照片">${hasNote ? "有備註／照片 ▾" : "備註／照片 ▾"}</button>`
+      : `<div class="item-name-wrap">
+          <button type="button" class="item-fold ${open ? "open" : ""}" data-toggle-hier-remark="${escapeAttr(n.id)}" title="展開／收合備註">${open ? "▼" : "▶"}</button>
+          <span class="hier-name-text">${escapeHtml(n.name || "")}</span>
+        </div>
+        ${hasNote ? `<button type="button" class="item-name-hit has-note" data-toggle-hier-remark="${escapeAttr(n.id)}" style="margin-top:4px;font-size:11px;" title="查看備註／照片">有備註／照片 ▾</button>` : ""}`;
+    const daysCell = editable
+      ? `<input type="number" data-hier-field="days" min="0" step="1" value="${n.days || 0}">`
+      : escapeHtml(String(n.days != null ? n.days : "-"));
+    const pctCell = editable
+      ? `<input type="number" class="pct-input ${pctClass(n.pct || 0)}" data-hier-field="pct" min="0" max="100" step="0.1" value="${pctVal}" ${pctReadonly ? "title=\"有下層時會依下層重算\"" : ""}>`
+      : `<span class="pct ${pctClass(n.pct || 0)}">${pctText(n.pct || 0)}</span>`;
+    const startCell = editable
+      ? `<input type="text" data-hier-field="start" placeholder="2026/10/19" value="${escapeAttr(n.start || "")}">`
+      : escapeHtml(n.start || "-");
+    const finishCell = editable
+      ? `<input type="text" data-hier-field="finish" placeholder="2026/12/16" value="${escapeAttr(n.finish || "")}">`
+      : escapeHtml(n.finish || "-");
+    const photoCell = editable ? `<td>${hierPhotoBtnHtml(n)}</td>` : "";
+    const actionCell = editable
+      ? `<td class="hier-actions">
+          ${canAdd2 ? `<button type="button" data-hier-add-child="2" title="新增第2層階段">＋階段</button>` : ""}
+          ${canAdd3 ? `<button type="button" data-hier-add-child="3" title="新增第3層工作項">＋工作項</button>` : ""}
+          ${lv > 1 ? `<button type="button" class="danger" data-hier-del title="刪除">刪</button>` : ""}
+        </td>`
+      : "";
+    const remarkInner = editable
+      ? `<label>備註說明</label>
           <textarea data-hier-field="note" placeholder="填寫此層級項目的備註說明…">${escapeHtml(n.note || "")}</textarea>
           <label>雲端照片</label>
-          ${hierPhotoGalleryHtml(n) || '<p class="note" style="margin:0">尚無照片，按「上傳照片」新增</p>'}
-        </div>
+          ${hierPhotoGalleryHtml(n) || '<p class="note" style="margin:0">尚無照片，按「上傳照片」新增</p>'}`
+      : `<label>備註說明</label>
+          <div class="hier-note-view">${escapeHtml(n.note || "（無備註）")}</div>
+          <label>雲端照片</label>
+          ${hierPhotoGalleryHtml(n, { readOnly: true }) || '<p class="note" style="margin:0">尚無照片</p>'}`;
+    return `<tr class="hier-l${lv}" data-hier-id="${escapeAttr(n.id)}">
+      <td>${i + 1}</td>
+      <td class="hier-name-cell hier-indent-${lv}">${nameCell}</td>
+      <td>${daysCell}</td>
+      <td>${pctCell}</td>
+      <td>${startCell}</td>
+      <td>${finishCell}</td>
+      ${photoCell}
+      ${actionCell}
+    </tr>
+    <tr class="hier-remark-row remark-row ${open ? "" : "hidden"}" data-hier-remark-for="${escapeAttr(n.id)}">
+      <td colspan="${colSpan}">
+        <div class="remark-box">${remarkInner}</div>
       </td>
     </tr>`;
-  }).join("") || `<tr><td colspan="8">尚無層級項目</td></tr>`;
-  document.getElementById("weekly").innerHTML = `
-    ${cloudBarHtml()}
+  }).join("") || `<tr><td colspan="${colSpan}">尚無層級項目</td></tr>`;
+
+  const toolbar = editable
+    ? `<div class="toolbar" style="margin-bottom:8px">
+        <button type="button" class="btn-cloud" data-hier-add-root-child title="在第1層下新增階段">＋ 新增階段</button>
+        <button type="button" class="btn-cloud" data-hier-rollup>依下層重算完成率</button>
+      </div>`
+    : "";
+  const headExtra = editable ? "<th>照片</th><th>操作</th>" : "";
+  const note = editable
+    ? `<p class="note">可在此編輯／新增層級、備註與照片。第2／1層完成率可由第3層自動彙總。編輯後請按「儲存本專案」。「周報」為只讀檢視。</p>`
+    : `<p class="note">周報為只讀顯示。新增／編輯層級、備註與照片請至「清單」。</p>`;
+
+  return `
     <div class="hier-legend">
       <span class="l1"><i></i>第1層 專案</span>
       <span class="l2"><i></i>第2層 階段</span>
       <span class="l3"><i></i>第3層 工作項</span>
       <span>整體完成率 ${pctText(pct)}</span>
     </div>
-    <div class="toolbar" style="margin-bottom:8px">
-      <button type="button" class="btn-cloud" data-hier-add-root-child title="在第1層下新增階段">＋ 新增階段</button>
-      <button type="button" class="btn-cloud" data-hier-rollup>依下層重算完成率</button>
-    </div>
+    ${toolbar}
     <section class="gantt-wrap">
-      <div class="gantt-head"><h2>層級進度表</h2></div>
+      <div class="gantt-head"><h2>${editable ? "層級清單（可編輯）" : "層級進度表"}</h2></div>
       <div class="scroll desktop-table"><table class="hier-table">
         <thead><tr>
-          <th>識別碼</th><th>Item</th><th>Days</th><th>%</th><th>Start</th><th>Finish</th><th>照片</th><th>操作</th>
+          <th>識別碼</th><th>Item</th><th>Days</th><th>%</th><th>Start</th><th>Finish</th>${headExtra}
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </section>
-    <p class="note">可直接在表上編輯／新增層級。點 ▶ 展開備註與照片（同設備清單）。第2／1層完成率可由第3層自動彙總。編輯後請按「儲存本專案」。</p>
+    ${note}
     <span id="hierRootId" data-root-id="${escapeAttr(rootId)}" hidden></span>`;
 }
 
+function renderHierarchyWeekly() {
+  document.getElementById("weekly").innerHTML = `
+    ${cloudBarHtml()}
+    ${buildHierarchyProgressBlock({ editable: false })}`;
+}
+
+function renderHierarchyItems() {
+  document.getElementById("items").innerHTML = `
+    ${cloudBarHtml()}
+    ${buildHierarchyProgressBlock({ editable: true })}`;
+}
+
 function renderHierarchySettings() {
-  ensureHierarchyNodes();
-  rollupHierarchyPct();
-  const nodes = hierOrderedNodes();
-  const rows = nodes.map(n => {
-    const lv = n.level || 1;
-    const canAdd2 = lv === 1;
-    const canAdd3 = lv === 2;
-    return `<tr class="hier-l${lv}" data-hier-id="${escapeAttr(n.id)}">
-      <td>L${lv}</td>
-      <td><input type="text" data-hier-field="name" value="${escapeAttr(n.name || "")}" style="width:100%"></td>
-      <td><input type="number" data-hier-field="days" min="0" step="1" value="${n.days || 0}" style="width:70px"></td>
-      <td><input type="number" data-hier-field="pct" min="0" max="100" step="0.1" value="${((Number(n.pct) || 0) * 100).toFixed(1)}" style="width:80px"></td>
-      <td><input type="text" data-hier-field="start" placeholder="2026/10/19" value="${escapeAttr(n.start || "")}" style="width:100px"></td>
-      <td><input type="text" data-hier-field="finish" placeholder="2026/12/16" value="${escapeAttr(n.finish || "")}" style="width:100px"></td>
-      <td>${hierPhotoBtnHtml(n)}</td>
-      <td class="set-actions">
-        ${canAdd2 ? `<button type="button" data-hier-add-child="2" title="新增第2層">＋階段</button>` : ""}
-        ${canAdd3 ? `<button type="button" data-hier-add-child="3" title="新增第3層">＋工作項</button>` : ""}
-        <button type="button" data-toggle-hier-remark="${escapeAttr(n.id)}" title="備註">備註</button>
-        ${lv > 1 ? `<button type="button" class="danger" data-hier-del title="刪除">刪</button>` : ""}
-      </td>
-    </tr>
-    <tr class="hier-remark-row remark-row ${state.openHierRemark === n.id ? "" : "hidden"}" data-hier-remark-for="${escapeAttr(n.id)}">
-      <td colspan="8">
-        <div class="remark-box">
-          <label>備註說明</label>
-          <textarea data-hier-field="note" placeholder="備註…">${escapeHtml(n.note || "")}</textarea>
-          <label>雲端照片</label>
-          ${hierPhotoGalleryHtml(n) || '<p class="note" style="margin:0">尚無照片</p>'}
-        </div>
-      </td>
-    </tr>`;
-  }).join("");
   document.getElementById("settings").innerHTML = `
-    <h2 class="section-title">層級專案架構設定</h2>
-    <p class="note">第1層＝專案（紅）、第2層＝階段（橘）、第3層＝工作項（綠）。周報表亦可直接編輯／新增／備註／上傳照片。</p>
+    <h2 class="section-title">層級專案設定</h2>
+    <p class="note">第1層＝專案（紅）、第2層＝階段（橘）、第3層＝工作項（綠）。日常編輯請至「清單」；「周報」僅供檢視。</p>
     <div class="toolbar" style="margin-bottom:10px">
       <button type="button" class="btn-cloud" data-hier-rollup>依下層重算完成率</button>
       <button type="button" class="btn-cloud" data-hier-import-pdf title="匯入晶睿TY2 R02 電力／CDA／排氣進度表">匯入 PDF 水電進度表</button>
-    </div>
-    <div class="scroll desktop-table"><table class="hier-table">
-      <thead><tr>
-        <th>層</th><th>名稱</th><th>Days</th><th>% (0-100)</th><th>Start</th><th>Finish</th><th>照片</th><th>操作</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>`;
+      <button type="button" class="btn-cloud" data-goto-hier-items>前往清單編輯</button>
+    </div>`;
 }
 
 function renderWeekly() {
@@ -4350,12 +4377,12 @@ function render() {
   if (state.tab === "weekly") renderWeekly();
   if (state.tab === "overview") {
     if (isHierarchyArch()) {
-      document.getElementById("overview").innerHTML = `<p class="note">層級專案請使用「架線周報」查看進度表，或至「設定」編輯層級。</p>`;
+      document.getElementById("overview").innerHTML = `<p class="note">層級專案請用「周報」檢視進度，或至「清單」編輯層級項目。</p>`;
     } else renderOverview();
   }
   if (state.tab === "items") {
     if (isHierarchyArch()) {
-      document.getElementById("items").innerHTML = `<p class="note">層級專案無設備清單。請在「設定」維護第1／2／3層項目。</p>`;
+      renderHierarchyItems();
     } else renderItems();
   }
   if (state.tab === "map") {
@@ -5708,6 +5735,11 @@ document.body.addEventListener("click", ev => {
       return;
     }
     state.tab = "settings";
+    render();
+    return;
+  }
+  if (ev.target.closest("[data-goto-hier-items]")) {
+    state.tab = "items";
     render();
     return;
   }
