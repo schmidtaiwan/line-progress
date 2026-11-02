@@ -1313,6 +1313,21 @@
   .hier-legend .l1 i { background: #fca5a5; }
   .hier-legend .l2 i { background: #fdba74; }
   .hier-legend .l3 i { background: #86efac; }
+  .hier-table input[data-hier-field],
+  .hier-table textarea[data-hier-field] {
+    width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1;
+    border-radius: 6px; padding: 4px 6px; font: inherit; background: #fff;
+  }
+  .hier-table input[data-hier-field="days"],
+  .hier-table input[data-hier-field="pct"] { width: 72px; text-align: center; }
+  .hier-table input[data-hier-field="start"],
+  .hier-table input[data-hier-field="finish"] { width: 108px; }
+  .hier-table .hier-name-cell { min-width: 240px; }
+  .hier-table .hier-actions { white-space: nowrap; }
+  .hier-table .hier-actions button { margin: 0 2px 2px 0; font-size: 12px; }
+  .hier-table tr.hier-remark-row td { background: #f8fafc; text-align: left; }
+  .hier-table .item-name-wrap { display: flex; align-items: flex-start; gap: 4px; }
+  .hier-table .item-name-wrap input[data-hier-field="name"] { flex: 1; }
   .np-mask {
     position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
     display: none; align-items: center; justify-content: center; z-index: 80;
@@ -1389,7 +1404,7 @@
 <div class="app-main">
 <header class="top">
   <div class="top-row">
-    <h1 id="title"></h1>
+  <h1 id="title"></h1>
     <div class="top-right">
       <span class="page-ver" id="pageVer">版次 —</span>
       <div class="top-actions">
@@ -1525,7 +1540,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1536,8 +1551,8 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 44;
-const PAGE_DATE = "2026-10-30";
+const PAGE_BUILD = 45;
+const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
   "arch": "hierarchy",
@@ -2094,9 +2109,9 @@ function blankHierarchyPayload(name) {
     stages: [],
     segOrder: [],
     nodes: [
-      { id: id1, parentId: "", level: 1, name: label, days: 0, pct: 0, start: "", finish: "", note: "" },
-      { id: id2, parentId: id1, level: 2, name: "階段一", days: 0, pct: 0, start: "", finish: "", note: "" },
-      { id: id3, parentId: id2, level: 3, name: "工作項 1", days: 0, pct: 0, start: "", finish: "", note: "" }
+      { id: id1, parentId: "", level: 1, name: label, days: 0, pct: 0, start: "", finish: "", note: "", photos: [] },
+      { id: id2, parentId: id1, level: 2, name: "階段一", days: 0, pct: 0, start: "", finish: "", note: "", photos: [] },
+      { id: id3, parentId: id2, level: 3, name: "工作項 1", days: 0, pct: 0, start: "", finish: "", note: "", photos: [] }
     ]
   };
 }
@@ -2159,6 +2174,7 @@ function ensureHierarchyNodes() {
     n.start = n.start || "";
     n.finish = n.finish || "";
     n.note = n.note || "";
+    if (!Array.isArray(n.photos)) n.photos = [];
   });
 }
 
@@ -3442,22 +3458,129 @@ function renderProjectsOverviewWeekly() {
     <p class="note">總覽為唯讀彙整。要改進度請點「進入專案」或左側專案名稱。可用左側「全部儲存」一次寫回雲端。</p>`;
 }
 
+function hierPhotoBtnHtml(node) {
+  const id = node && node.id;
+  const n = itemPhotos(node).length;
+  const cls = "btn-photo" + (n ? " has" : "");
+  const label = n ? ("照片 " + n) : "上傳照片";
+  const tip = n
+    ? "左鍵／點擊：再上傳　｜　右鍵／長按：預覽"
+    : "可選相簿或檔案資料夾";
+  return `<div class="photo-cell">
+    <button type="button" class="${cls}" data-hier-upload-photo="${escapeAttr(id)}" title="${escapeAttr(tip)}">${label}</button>
+    <input class="photo-input" type="file" accept="image/*" multiple data-hier-photo-file="${escapeAttr(id)}">
+  </div>`;
+}
+
+function hierPhotoGalleryHtml(node) {
+  const id = node && node.id;
+  const photos = itemPhotos(node);
+  if (!photos.length) return "";
+  const chips = photos.map((p, pi) => {
+    const href = (p && p.webViewLink) || (p && p.id ? ("https://drive.google.com/file/d/" + p.id + "/view") : "#");
+    const name = escapeHtml((p && p.name) || ("照片" + (pi + 1)));
+    return `<div class="photo-chip">
+      <a href="${escapeAttr(href)}" target="_blank" rel="noopener">${name}</a>
+      <button type="button" class="btn-del" data-hier-del-photo="${escapeAttr(id)}" data-photo-i="${pi}">刪除照片</button>
+    </div>`;
+  }).join("");
+  return `<div class="photo-gallery" data-hier-photo-gallery="${escapeAttr(id)}">${chips}</div>`;
+}
+
+async function showHierPhotoPreview(nodeId) {
+  const node = (DATA.nodes || []).find(n => n.id === nodeId);
+  const photos = itemPhotos(node);
+  if (!node || !photos.length) {
+    toast("尚無照片可預覽");
+    return;
+  }
+  const mask = document.getElementById("photoPreviewMask");
+  const list = document.getElementById("photoPreviewList");
+  const title = document.getElementById("photoPreviewTitle");
+  if (!mask || !list) return;
+  if (title) title.textContent = (node.name || "層級項目") + "　｜　照片 " + photos.length;
+  list.innerHTML = photos.map((p, pi) => {
+    const name = escapeHtml((p && p.name) || ("照片" + (pi + 1)));
+    const href = (p && p.webViewLink) || (p && p.id ? ("https://drive.google.com/file/d/" + p.id + "/view") : "#");
+    return `<div class="photo-preview-item" data-preview-i="${pi}">
+      <div class="err" data-preview-wait>載入中…</div>
+      <div class="cap"><a href="${escapeAttr(href)}" target="_blank" rel="noopener">${name}</a></div>
+    </div>`;
+  }).join("");
+  mask.classList.add("show");
+  if (!window.LineOneDrive || !isCloudLoggedIn()) {
+    list.querySelectorAll("[data-preview-wait]").forEach(el => {
+      el.textContent = "請先登入後預覽，或點檔名在雲端開啟";
+    });
+    return;
+  }
+  for (let pi = 0; pi < photos.length; pi++) {
+    const p = photos[pi];
+    const box = list.querySelector(`[data-preview-i="${pi}"]`);
+    if (!box || !p || !p.id) continue;
+    try {
+      const blob = await LineOneDrive.downloadFileBlob(p.id);
+      const url = URL.createObjectURL(blob);
+      const wait = box.querySelector("[data-preview-wait]");
+      if (wait) wait.remove();
+      const img = document.createElement("img");
+      img.alt = p.name || ("照片" + (pi + 1));
+      img.src = url;
+      box.insertBefore(img, box.firstChild);
+    } catch (e) {
+      console.warn(e);
+      const wait = box.querySelector("[data-preview-wait]");
+      if (wait) wait.textContent = "預覽失敗，請點檔名開啟";
+    }
+  }
+}
+
 function renderHierarchyWeekly() {
+  ensureHierarchyNodes();
   rollupHierarchyPct();
   const nodes = hierOrderedNodes();
   const root = nodes.find(n => n.level === 1) || nodes[0];
   const pct = root ? (Number(root.pct) || 0) : 0;
+  const rootId = root ? root.id : "";
   const rows = nodes.map((n, i) => {
     const lv = n.level || 1;
-    return `<tr class="hier-l${lv}">
+    const open = state.openHierRemark === n.id;
+    const hasNote = !!(n.note && String(n.note).trim()) || itemPhotos(n).length > 0;
+    const canAdd2 = lv === 1;
+    const canAdd3 = lv === 2;
+    const pctVal = ((Number(n.pct) || 0) * 100).toFixed(1);
+    const pctReadonly = (lv < 3 && hierChildren(n.id).length > 0);
+    return `<tr class="hier-l${lv}" data-hier-id="${escapeAttr(n.id)}">
       <td>${i + 1}</td>
-      <td class="hier-name hier-indent-${lv}">${escapeHtml(n.name || "")}</td>
-      <td>${n.days || 0} d</td>
-      <td class="pct ${pctClass(n.pct || 0)}">${pctText(n.pct || 0)}</td>
-      <td>${escapeHtml(n.start || "-")}</td>
-      <td>${escapeHtml(n.finish || "-")}</td>
+      <td class="hier-name-cell hier-indent-${lv}">
+        <div class="item-name-wrap">
+          <button type="button" class="item-fold ${open ? "open" : ""}" data-toggle-hier-remark="${escapeAttr(n.id)}" title="展開／收合備註">${open ? "▼" : "▶"}</button>
+          <input type="text" data-hier-field="name" value="${escapeAttr(n.name || "")}" title="點名稱旁三角形可展開備註／照片">
+        </div>
+        <button type="button" class="item-name-hit ${hasNote ? "has-note" : ""}" data-toggle-hier-remark="${escapeAttr(n.id)}" style="margin-top:4px;font-size:11px;" title="展開備註／照片">${hasNote ? "有備註／照片 ▾" : "備註／照片 ▾"}</button>
+      </td>
+      <td><input type="number" data-hier-field="days" min="0" step="1" value="${n.days || 0}"></td>
+      <td><input type="number" class="pct-input ${pctClass(n.pct || 0)}" data-hier-field="pct" min="0" max="100" step="0.1" value="${pctVal}" ${pctReadonly ? "title=\"有下層時會依下層重算\"" : ""}></td>
+      <td><input type="text" data-hier-field="start" placeholder="2026/10/19" value="${escapeAttr(n.start || "")}"></td>
+      <td><input type="text" data-hier-field="finish" placeholder="2026/12/16" value="${escapeAttr(n.finish || "")}"></td>
+      <td>${hierPhotoBtnHtml(n)}</td>
+      <td class="hier-actions">
+        ${canAdd2 ? `<button type="button" data-hier-add-child="2" title="新增第2層階段">＋階段</button>` : ""}
+        ${canAdd3 ? `<button type="button" data-hier-add-child="3" title="新增第3層工作項">＋工作項</button>` : ""}
+        ${lv > 1 ? `<button type="button" class="danger" data-hier-del title="刪除">刪</button>` : ""}
+      </td>
+    </tr>
+    <tr class="hier-remark-row remark-row ${open ? "" : "hidden"}" data-hier-remark-for="${escapeAttr(n.id)}">
+      <td colspan="8">
+        <div class="remark-box">
+          <label>備註說明</label>
+          <textarea data-hier-field="note" placeholder="填寫此層級項目的備註說明…">${escapeHtml(n.note || "")}</textarea>
+          <label>雲端照片</label>
+          ${hierPhotoGalleryHtml(n) || '<p class="note" style="margin:0">尚無照片，按「上傳照片」新增</p>'}
+        </div>
+      </td>
     </tr>`;
-  }).join("") || `<tr><td colspan="6">尚無層級項目，請到設定新增</td></tr>`;
+  }).join("") || `<tr><td colspan="8">尚無層級項目</td></tr>`;
   document.getElementById("weekly").innerHTML = `
     ${cloudBarHtml()}
     <div class="hier-legend">
@@ -3466,16 +3589,21 @@ function renderHierarchyWeekly() {
       <span class="l3"><i></i>第3層 工作項</span>
       <span>整體完成率 ${pctText(pct)}</span>
     </div>
+    <div class="toolbar" style="margin-bottom:8px">
+      <button type="button" class="btn-cloud" data-hier-add-root-child title="在第1層下新增階段">＋ 新增階段</button>
+      <button type="button" class="btn-cloud" data-hier-rollup>依下層重算完成率</button>
+    </div>
     <section class="gantt-wrap">
       <div class="gantt-head"><h2>層級進度表</h2></div>
       <div class="scroll desktop-table"><table class="hier-table">
         <thead><tr>
-          <th>識別碼</th><th>Item</th><th>Days</th><th>%</th><th>Start</th><th>Finish</th>
+          <th>識別碼</th><th>Item</th><th>Days</th><th>%</th><th>Start</th><th>Finish</th><th>照片</th><th>操作</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </section>
-    <p class="note">層級專案架構：紅＝第1層、橘＝第2層、綠＝第3層。可在「設定」新增／編輯；第2／1層完成率可由第3層自動彙總。</p>`;
+    <p class="note">可直接在表上編輯／新增層級。點 ▶ 展開備註與照片（同設備清單）。第2／1層完成率可由第3層自動彙總。編輯後請按「儲存本專案」。</p>
+    <span id="hierRootId" data-root-id="${escapeAttr(rootId)}" hidden></span>`;
 }
 
 function renderHierarchySettings() {
@@ -3493,23 +3621,35 @@ function renderHierarchySettings() {
       <td><input type="number" data-hier-field="pct" min="0" max="100" step="0.1" value="${((Number(n.pct) || 0) * 100).toFixed(1)}" style="width:80px"></td>
       <td><input type="text" data-hier-field="start" placeholder="2026/10/19" value="${escapeAttr(n.start || "")}" style="width:100px"></td>
       <td><input type="text" data-hier-field="finish" placeholder="2026/12/16" value="${escapeAttr(n.finish || "")}" style="width:100px"></td>
+      <td>${hierPhotoBtnHtml(n)}</td>
       <td class="set-actions">
         ${canAdd2 ? `<button type="button" data-hier-add-child="2" title="新增第2層">＋階段</button>` : ""}
         ${canAdd3 ? `<button type="button" data-hier-add-child="3" title="新增第3層">＋工作項</button>` : ""}
+        <button type="button" data-toggle-hier-remark="${escapeAttr(n.id)}" title="備註">備註</button>
         ${lv > 1 ? `<button type="button" class="danger" data-hier-del title="刪除">刪</button>` : ""}
+      </td>
+    </tr>
+    <tr class="hier-remark-row remark-row ${state.openHierRemark === n.id ? "" : "hidden"}" data-hier-remark-for="${escapeAttr(n.id)}">
+      <td colspan="8">
+        <div class="remark-box">
+          <label>備註說明</label>
+          <textarea data-hier-field="note" placeholder="備註…">${escapeHtml(n.note || "")}</textarea>
+          <label>雲端照片</label>
+          ${hierPhotoGalleryHtml(n) || '<p class="note" style="margin:0">尚無照片</p>'}
+        </div>
       </td>
     </tr>`;
   }).join("");
   document.getElementById("settings").innerHTML = `
     <h2 class="section-title">層級專案架構設定</h2>
-    <p class="note">第1層＝專案（紅）、第2層＝階段（橘）、第3層＝工作項（綠）。編輯後按「儲存本專案」寫入雲端。</p>
+    <p class="note">第1層＝專案（紅）、第2層＝階段（橘）、第3層＝工作項（綠）。周報表亦可直接編輯／新增／備註／上傳照片。</p>
     <div class="toolbar" style="margin-bottom:10px">
       <button type="button" class="btn-cloud" data-hier-rollup>依下層重算完成率</button>
       <button type="button" class="btn-cloud" data-hier-import-pdf title="匯入晶睿TY2 R02 電力／CDA／排氣進度表">匯入 PDF 水電進度表</button>
     </div>
     <div class="scroll desktop-table"><table class="hier-table">
       <thead><tr>
-        <th>層</th><th>名稱</th><th>Days</th><th>% (0-100)</th><th>Start</th><th>Finish</th><th>操作</th>
+        <th>層</th><th>名稱</th><th>Days</th><th>% (0-100)</th><th>Start</th><th>Finish</th><th>照片</th><th>操作</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
@@ -3982,7 +4122,7 @@ function buildItemsDetailHtml(eq) {
           <tbody>${itemRows}</tbody>
         </table></div>
         <p class="note">點細項名稱可展開備註；點「預計完成」可下拉設定預計開始／預計完成／實際完成時間。</p>
-      </div>`;
+    </div>`;
 }
 
 /** 只換右側明細，不動左側清單 DOM（避免捲動跳回頂端） */
@@ -5323,7 +5463,7 @@ async function cloudLogin() {
     await LineOneDrive.login({ switchAccount: true });
     toast("已登入雲端");
     startCloudWatch();
-    hideSyncConflict();
+          hideSyncConflict();
     // 登入後載入專案清單並切到作用中專案（含雲端進度）
     try {
       await ensureProjectsLoaded();
@@ -5662,6 +5802,65 @@ document.body.addEventListener("click", ev => {
     render();
     return;
   }
+  if (ev.target.closest("[data-hier-add-root-child]")) {
+    ensureHierarchyNodes();
+    const root = (DATA.nodes || []).find(n => n.level === 1) || DATA.nodes[0];
+    if (!root) return;
+    DATA.nodes.push({
+      id: newHierId(), parentId: root.id, level: 2,
+      name: "新階段", days: 0, pct: 0, start: "", finish: "", note: "", photos: []
+    });
+    state.dirty = true;
+    saveLocal("已新增第2層階段");
+    render();
+    return;
+  }
+  const toggleHierRemark = ev.target.closest("[data-toggle-hier-remark]");
+  if (toggleHierRemark) {
+    const id = toggleHierRemark.dataset.toggleHierRemark;
+    state.openHierRemark = state.openHierRemark === id ? null : id;
+    render();
+    if (state.openHierRemark === id) {
+      const box = document.querySelector('tr[data-hier-remark-for="' + id.replace(/"/g, '\\"') + '"] textarea');
+      if (box) box.focus();
+    }
+    return;
+  }
+  const hierUploadBtn = ev.target.closest("[data-hier-upload-photo]");
+  if (hierUploadBtn) {
+    const id = hierUploadBtn.dataset.hierUploadPhoto;
+    const wrap = hierUploadBtn.closest(".photo-cell") || hierUploadBtn.parentElement;
+    const input = (wrap && wrap.querySelector("[data-hier-photo-file]"))
+      || document.querySelector('[data-hier-photo-file="' + id.replace(/"/g, '\\"') + '"]');
+    if (input) {
+      input.removeAttribute("capture");
+      input.click();
+    }
+    return;
+  }
+  const hierDelPhoto = ev.target.closest("[data-hier-del-photo]");
+  if (hierDelPhoto) {
+    const id = hierDelPhoto.dataset.hierDelPhoto;
+    const pi = Number(hierDelPhoto.dataset.photoI);
+    const node = (DATA.nodes || []).find(n => n.id === id);
+    if (!node || !Array.isArray(node.photos) || !node.photos[pi]) return;
+    const photo = node.photos[pi];
+    if (!confirm("確定刪除此照片？\n" + (photo.name || ""))) return;
+    const finish = () => {
+      node.photos.splice(pi, 1);
+      state.dirty = true;
+      saveLocal("已刪除照片");
+      render();
+    };
+    if (window.LineOneDrive && photo.id && isCloudLoggedIn()) {
+      toast("正在刪除雲端照片…");
+      LineOneDrive.deleteDriveFile(photo.id).then(finish).catch(e => {
+        console.warn(e);
+        if (confirm("雲端刪除失敗，仍從清單移除？\n" + (e.message || e))) finish();
+      });
+    } else finish();
+    return;
+  }
   const hierAdd = ev.target.closest("[data-hier-add-child]");
   if (hierAdd) {
     const tr = hierAdd.closest("[data-hier-id]");
@@ -5672,7 +5871,7 @@ document.body.addEventListener("click", ev => {
     DATA.nodes.push({
       id: newHierId(), parentId: pid, level: lv,
       name: lv === 2 ? "新階段" : "新工作項",
-      days: 0, pct: 0, start: "", finish: "", note: ""
+      days: 0, pct: 0, start: "", finish: "", note: "", photos: []
     });
     state.dirty = true;
     saveLocal("已新增層級項目");
@@ -5751,7 +5950,7 @@ document.body.addEventListener("click", ev => {
     state.openDates = null;
     if (!refreshEqDetailPanel(scrollSave)) {
       state._eqListScroll = scrollSave;
-      render();
+    render();
       pinEqListScroll(scrollSave);
     }
     return;
@@ -5770,7 +5969,7 @@ document.body.addEventListener("click", ev => {
     state.openDates = null;
     if (!refreshEqDetailPanel(scrollSave)) {
       state._eqListScroll = scrollSave;
-      render();
+    render();
       pinEqListScroll(scrollSave);
     }
     const box = document.querySelector(`tr[data-remark-for="${idx}"] textarea`)
@@ -5785,7 +5984,7 @@ document.body.addEventListener("click", ev => {
     state.openDates = state.openDates === idx ? null : idx;
     if (!refreshEqDetailPanel(scrollSave)) {
       state._eqListScroll = scrollSave;
-      render();
+    render();
       pinEqListScroll(scrollSave);
     }
     return;
@@ -5952,6 +6151,15 @@ document.body.addEventListener("contextmenu", ev => {
     showEqCtxMenu(ev.clientX, ev.clientY, eqIdx);
     return;
   }
+  const hierBtn = ev.target.closest("[data-hier-upload-photo]");
+  if (hierBtn) {
+    const id = hierBtn.dataset.hierUploadPhoto;
+    const node = (DATA.nodes || []).find(n => n.id === id);
+    if (!itemPhotos(node).length) return;
+    ev.preventDefault();
+    showHierPhotoPreview(id);
+    return;
+  }
   const btn = ev.target.closest("[data-upload-photo]");
   if (!btn) return;
   const idx = Number(btn.dataset.uploadPhoto);
@@ -6058,16 +6266,64 @@ document.body.addEventListener("change", async (ev) => {
   const hierField = ev.target.closest("[data-hier-field]");
   if (hierField) {
     const tr = hierField.closest("[data-hier-id]");
-    const id = tr && tr.dataset.hierId;
+    const remarkTr = hierField.closest("[data-hier-remark-for]");
+    const id = (tr && tr.dataset.hierId) || (remarkTr && remarkTr.dataset.hierRemarkFor);
     const field = hierField.dataset.hierField;
     const node = (DATA.nodes || []).find(n => n.id === id);
     if (node && field) {
       if (field === "pct") node.pct = Math.max(0, Math.min(1, (Number(hierField.value) || 0) / 100));
       else if (field === "days") node.days = Math.max(0, Number(hierField.value) || 0);
       else node[field] = hierField.value;
+      if (field === "pct" || field === "days" || field === "start" || field === "finish") {
+        rollupHierarchyPct();
+      }
       state.dirty = true;
       try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
       updateCloudBar();
+      if (field === "pct" || field === "days" || field === "start" || field === "finish") {
+        const keep = state.openHierRemark;
+        state.openHierRemark = keep;
+        render();
+      }
+    }
+    return;
+  }
+  const hierPhotoInput = ev.target.closest("[data-hier-photo-file]");
+  if (hierPhotoInput) {
+    const id = hierPhotoInput.dataset.hierPhotoFile;
+    const files = hierPhotoInput.files ? Array.from(hierPhotoInput.files) : [];
+    hierPhotoInput.value = "";
+    if (!files.length) return;
+    if (!window.LineOneDrive || !isCloudLoggedIn()) {
+      toast("請先登入 Google");
+      return;
+    }
+    const node = (DATA.nodes || []).find(n => n.id === id);
+    if (!node) return;
+    try {
+      toast("正在上傳照片（" + files.length + "）…");
+      if (!Array.isArray(node.photos)) node.photos = [];
+      const label = "hier_" + String(node.name || "item").slice(0, 20);
+      for (const file of files) {
+        const meta = await LineOneDrive.uploadPhoto(file, label);
+        node.photos.push(meta);
+      }
+      state.openHierRemark = id;
+      state.dirty = true;
+      saveLocal("照片已上傳");
+      try {
+        await LineOneDrive.uploadJson(cloudPayload());
+        state.dirty = false;
+        updateCloudBar();
+      } catch (e2) {
+        console.warn(e2);
+        toast("照片已上傳，但進度儲存失敗，請再按「儲存」");
+      }
+      render();
+      toast("已上傳 " + files.length + " 張照片到雲端");
+    } catch (e) {
+      console.error(e);
+      toast("上傳失敗：" + (e.message || e));
     }
     return;
   }
