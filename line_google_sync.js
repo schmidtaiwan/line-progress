@@ -41,6 +41,15 @@
     return splitPath(cfg.projectsRoot || "架線進度專案");
   }
 
+  /** 多帳號共用根資料夾 ID（有值則所有登入帳號讀寫同一份） */
+  function sharedProjectsRootId() {
+    return String(cfg.projectsRootId || cfg.sharedFolderId || "").trim();
+  }
+
+  function isSharedProjectsRoot() {
+    return !!sharedProjectsRootId();
+  }
+
   function sanitizeProjectFolderName(name) {
     return String(name || "新專案")
       .replace(/[\\/:*?"<>|]/g, "_")
@@ -90,6 +99,8 @@
   }
 
   function ensureProjectsRootId() {
+    const fixed = sharedProjectsRootId();
+    if (fixed) return Promise.resolve(fixed);
     const parts = projectsRootParts();
     if (!parts.length) return Promise.resolve("root");
     let chain = Promise.resolve("root");
@@ -102,6 +113,20 @@
       });
     });
     return chain;
+  }
+
+  /** 專案資料夾相對共用根／projectsRoot 的路徑片段（通常只有專案名稱） */
+  function projectFolderWalkParts() {
+    const parts = folderPathParts();
+    const rootParts = projectsRootParts();
+    let walk = parts.slice();
+    let i = 0;
+    while (i < rootParts.length && i < walk.length && walk[i] === rootParts[i]) i += 1;
+    walk = walk.slice(i);
+    if (!walk.length && activeProject && activeProject.name) {
+      walk = [sanitizeProjectFolderName(activeProject.name)];
+    }
+    return walk;
   }
 
   function defaultProjectsList() {
@@ -710,7 +735,8 @@
     );
     return driveFetch(
       "https://www.googleapis.com/drive/v3/files?q=" + q +
-      "&fields=files(id,name)&pageSize=1&spaces=drive"
+      "&fields=files(id,name)&pageSize=1&spaces=drive" +
+      "&supportsAllDrives=true&includeItemsFromAllDrives=true"
     ).then(function (res) {
       if (!res.ok) return res.text().then(function (t) { throw new Error("搜尋資料夾失敗 " + res.status + " " + t); });
       return res.json();
@@ -725,7 +751,7 @@
       mimeType: "application/vnd.google-apps.folder",
       parents: [parentId]
     };
-    return driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name", {
+    return driveFetch("https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id,name", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(meta)
@@ -742,13 +768,20 @@
       return Promise.resolve(fixed);
     }
     if (cachedFolderId) return Promise.resolve(cachedFolderId);
-    const parts = folderPathParts();
-    if (!parts.length) {
+
+    // 共用根：從 projectsRootId 往下找專案名稱；否則從「我的雲端硬碟」走完整路徑
+    const sharedRoot = sharedProjectsRootId();
+    const walkParts = sharedRoot ? projectFolderWalkParts() : folderPathParts();
+    if (!walkParts.length) {
+      if (sharedRoot) {
+        cachedFolderId = sharedRoot;
+        return Promise.resolve(sharedRoot);
+      }
       cachedFolderId = "root";
       return Promise.resolve("root");
     }
-    let chain = Promise.resolve("root");
-    parts.forEach(function (part) {
+    let chain = sharedRoot ? Promise.resolve(sharedRoot) : Promise.resolve("root");
+    walkParts.forEach(function (part) {
       chain = chain.then(function (parentId) {
         return findChildFolder(parentId, part).then(function (id) {
           if (id) return id;
@@ -765,7 +798,8 @@
   function driveListByQuery(q) {
     return driveFetch(
       "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
-      "&fields=files(id,name,modifiedTime,parents)&pageSize=20&spaces=drive&orderBy=modifiedTime desc"
+      "&fields=files(id,name,modifiedTime,parents)&pageSize=20&spaces=drive&orderBy=modifiedTime desc" +
+      "&supportsAllDrives=true&includeItemsFromAllDrives=true"
     ).then(function (res) {
       if (!res.ok) return res.text().then(function (t) { throw new Error("搜尋雲端檔失敗 " + res.status + " " + t); });
       return res.json();
@@ -1076,7 +1110,8 @@
         state.viewers > 0
           ? "　｜　連線查看 " + state.viewers + " 個"
           : "";
-      return "Google 雲端　｜　已登入 " + who + view +
+      const share = isSharedProjectsRoot() ? "　｜　共用資料夾" : "";
+      return "Google 雲端　｜　已登入 " + who + share + view +
         (state.lastCloudAt ? "　｜　上次雲端 " + state.lastCloudAt.replace("T", " ").slice(0, 19) : "");
     }
     return "Google 雲端　｜　未登入（登入後才載入資料）";
@@ -1216,6 +1251,7 @@
     login: login,
     logout: logout,
     accountEmail: accountEmail,
+    isSharedProjectsRoot: isSharedProjectsRoot,
     downloadJson: downloadJson,
     uploadJson: uploadJson,
     scheduleUpload: scheduleUpload,
