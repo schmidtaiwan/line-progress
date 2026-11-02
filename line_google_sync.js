@@ -166,14 +166,19 @@
     });
   }
 
+  /** 資料夾名比對鍵：去空白／不分大小寫（避免「DIP 自動換線」vs「DIP自動換線」重覆建立） */
+  function normFolderKey(name) {
+    return String(name || "").replace(/\s+/g, "").toLowerCase();
+  }
+
   function ensureNamedChildFolder(parentId, name) {
     return findChildFolder(parentId, name).then(function (id) {
       if (id) return id;
-      return createChildFolder(parentId, name);
+      return createChildFolder(parentId, sanitizeProjectFolderName(name));
     });
   }
 
-  /** 把單一專案的 line_data.json 從舊根複製到共用根 */
+  /** 把單一專案的 line_data.json 從舊根複製到共用根（同名資料夾不新建） */
   function copyProjectJsonToShared(sharedRootId, oldRootId, proj) {
     const name = String((proj && proj.name) || "").trim();
     if (!name) return Promise.resolve(null);
@@ -189,7 +194,7 @@
         if (!payload) return null;
         return ensureNamedChildFolder(sharedRootId, folderName).then(function (newProjId) {
           return putJsonInFolder(newProjId, fileName(), payload).then(function () {
-            return normalizeProjectRecord(proj);
+            return normalizeProjectRecord(Object.assign({}, proj, { name: folderName }));
           });
         });
       });
@@ -197,57 +202,48 @@
   }
 
   /**
-   * 共用根若尚無／僅有預設清單，從個人「架線進度專案」遷移專案清單與 JSON。
-   * 之後所有讀寫都以共用根為準。
+   * 僅在共用根「完全沒有專案資料夾」時，才從個人「架線進度專案」遷移。
+   * 已有資料夾時以 Drive 實體為準，不再複製、不再新建。
    */
   function migrateIntoSharedRootIfNeeded(sharedRootId, sharedList) {
     if (!isSharedProjectsRoot()) return Promise.resolve(sharedList || []);
-    return findPersonalProjectsRootId().then(function (oldRoot) {
-      if (!oldRoot || oldRoot === sharedRootId) return sharedList || [];
-      return fetchJsonInFolder(oldRoot, "projects_index.json").then(function (data) {
-        const oldList = (data && Array.isArray(data.projects)) ? data.projects : [];
-        if (!oldList.length) return sharedList || [];
-        const shared = sharedList || [];
-        const byName = {};
-        shared.forEach(function (p) { byName[String(p.name || "")] = true; });
-        const onlyDefault =
-          shared.length === 0 ||
-          (shared.length === 1 &&
-            (/^vivo-r01$/i.test(String(shared[0].id || "")) || /^vivo\s*r0?1$/i.test(String(shared[0].name || ""))));
-        const missing = oldList.filter(function (p) {
-          return p && p.name && !byName[String(p.name)];
-        });
-        const toCopy = onlyDefault && oldList.length ? oldList : missing;
-        if (!toCopy.length) return shared;
-        let chain = Promise.resolve([]);
-        toCopy.forEach(function (p) {
-          chain = chain.then(function (acc) {
-            return copyProjectJsonToShared(sharedRootId, oldRoot, p).then(function (rec) {
-              acc.push(rec || normalizeProjectRecord(p));
-              return acc;
-            }).catch(function () {
-              acc.push(normalizeProjectRecord(p));
-              return acc;
+    return listChildFolders(sharedRootId).then(function (folders) {
+      const projectFolders = (folders || []).filter(function (f) {
+        return !!normFolderKey(f.name);
+      });
+      if (projectFolders.length) return sharedList || [];
+      return findPersonalProjectsRootId().then(function (oldRoot) {
+        if (!oldRoot || oldRoot === sharedRootId) return sharedList || [];
+        return fetchJsonInFolder(oldRoot, "projects_index.json").then(function (data) {
+          const oldList = (data && Array.isArray(data.projects)) ? data.projects : [];
+          if (!oldList.length) return sharedList || [];
+          let chain = Promise.resolve([]);
+          oldList.forEach(function (p) {
+            chain = chain.then(function (acc) {
+              return copyProjectJsonToShared(sharedRootId, oldRoot, p).then(function (rec) {
+                if (rec) acc.push(rec);
+                else acc.push(normalizeProjectRecord(p));
+                return acc;
+              }).catch(function () {
+                acc.push(normalizeProjectRecord(p));
+                return acc;
+              });
             });
           });
-        });
-        return chain.then(function (copied) {
-          let next;
-          if (onlyDefault) next = copied;
-          else next = shared.map(normalizeProjectRecord).concat(copied);
-          // 去重（同名保留先出現）
-          const seen = {};
-          next = next.filter(function (p) {
-            const n = String(p.name || "");
-            if (!n || seen[n]) return false;
-            seen[n] = true;
-            return true;
+          return chain.then(function (copied) {
+            const seen = {};
+            const next = copied.filter(function (p) {
+              const k = normFolderKey(p.name);
+              if (!k || seen[k]) return false;
+              seen[k] = true;
+              return true;
+            });
+            return putJsonInFolder(sharedRootId, "projects_index.json", {
+              savedAt: new Date().toISOString(),
+              migratedFrom: legacyPersonalRootName(),
+              projects: next
+            }).then(function () { return next; });
           });
-          return putJsonInFolder(sharedRootId, "projects_index.json", {
-            savedAt: new Date().toISOString(),
-            migratedFrom: legacyPersonalRootName(),
-            projects: next
-          }).then(function () { return next; });
         });
       });
     }).catch(function () {
@@ -283,6 +279,28 @@
     const q = "name='" + safe + "' and trashed=false" + parentQueryClause(folderId);
     return driveListByQuery(q).then(function (files) {
       if (!files.length) return null;
+      // 多份同名時：專案清單取「專案數最多」；其餘取最新
+      if (String(name) === "projects_index.json" && files.length > 1) {
+        let chain = Promise.resolve({ best: null, bestN: -1, bestFile: files[0] });
+        files.forEach(function (f) {
+          chain = chain.then(function (acc) {
+            return fetchJsonById(f.id).then(function (data) {
+              const n = (data && Array.isArray(data.projects)) ? data.projects.length : 0;
+              if (n > acc.bestN) {
+                return { best: data, bestN: n, bestFile: f };
+              }
+              return acc;
+            });
+          });
+        });
+        return chain.then(function (acc) {
+          const keepId = acc.bestFile && acc.bestFile.id;
+          const trashOthers = files.filter(function (f) { return f.id !== keepId; }).map(function (f) {
+            return trashDriveFile(f.id);
+          });
+          return Promise.all(trashOthers).then(function () { return acc.best; });
+        });
+      }
       return fetchJsonById(files[0].id);
     });
   }
@@ -337,26 +355,88 @@
     const q = "name='" + safe + "' and trashed=false" + parentQueryClause(folderId);
     return driveListByQuery(q).then(function (files) {
       if (!files.length) return createJsonInFolder(folderId, name, body);
-      const fileId = files[0].id;
-      return driveFetch(
-        "https://www.googleapis.com/upload/drive/v3/files/" + encodeURIComponent(fileId) +
-        "?uploadType=media&supportsAllDrives=true",
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json; charset=utf-8" },
-          body: body
-        }
-      ).then(function (res) {
-        if (res.ok) return files[0];
-        return res.text().then(function (t) {
-          // 舊檔無權限／損壞：丟進垃圾桶後重建
-          if (res.status === 403 || res.status === 404) {
-            return trashDriveFile(fileId).then(function () {
-              return createJsonInFolder(folderId, name, body);
-            });
+      // 同名多份：保留最新一份，其餘進垃圾桶，絕不新建
+      const keep = files[0];
+      const trashOthers = files.slice(1).map(function (f) { return trashDriveFile(f.id); });
+      return Promise.all(trashOthers).then(function () {
+        return driveFetch(
+          "https://www.googleapis.com/upload/drive/v3/files/" + encodeURIComponent(keep.id) +
+          "?uploadType=media&supportsAllDrives=true",
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json; charset=utf-8" },
+            body: body
           }
-          throw new Error("寫入專案清單失敗 " + res.status + " " + t);
+        ).then(function (res) {
+          if (res.ok) return keep;
+          return res.text().then(function (t) {
+            if (res.status === 403 || res.status === 404) {
+              // 不可寫時改寫到既有其他檔；都失敗才新建一次
+              return trashDriveFile(keep.id).then(function () {
+                return driveListByQuery(q).then(function (left) {
+                  if (left.length) {
+                    return putJsonInFolder(folderId, name, payload);
+                  }
+                  return createJsonInFolder(folderId, name, body);
+                });
+              });
+            }
+            throw new Error("寫入專案清單失敗 " + res.status + " " + t);
+          });
         });
+      });
+    });
+  }
+
+  /** 以共用根底下「實體資料夾」重建專案清單，並清掉同名重複資料夾 */
+  function syncProjectsIndexFromDrive(rootId, hintList) {
+    const hints = {};
+    (hintList || []).forEach(function (p) {
+      const k = normFolderKey(p && p.name);
+      if (k) hints[k] = p;
+    });
+    return listChildFolders(rootId).then(function (folders) {
+      const groups = {};
+      (folders || []).forEach(function (f) {
+        const k = normFolderKey(f.name);
+        if (!k) return;
+        (groups[k] = groups[k] || []).push(f);
+      });
+      const keys = Object.keys(groups);
+      if (!keys.length) return [];
+      let chain = Promise.resolve([]);
+      keys.forEach(function (k) {
+        chain = chain.then(function (acc) {
+          return consolidateFolderGroup(groups[k]).then(function (best) {
+            if (!best) return acc;
+            return fetchJsonInFolder(best.id, fileName()).then(function (payload) {
+              const hint = hints[k] || {};
+              const arch = (payload && payload.arch === "hierarchy") || hint.arch === "hierarchy"
+                ? "hierarchy" : "equipment";
+              const displayName = String(best.name || hint.name || k).trim() || k;
+              acc.push(normalizeProjectRecord({
+                id: hint.id || ("p-" + String(best.id).slice(0, 10)),
+                name: displayName,
+                arch: arch,
+                legacyFallback: !!hint.legacyFallback,
+                legacyFolderPath: hint.legacyFolderPath || "",
+                legacyFileName: hint.legacyFileName || "",
+                createdAt: hint.createdAt || ""
+              }));
+              return acc;
+            });
+          });
+        });
+      });
+      return chain.then(function (list) {
+        list.sort(function (a, b) {
+          return String(a.name || "").localeCompare(String(b.name || ""), "zh-Hant");
+        });
+        return putJsonInFolder(rootId, "projects_index.json", {
+          savedAt: new Date().toISOString(),
+          syncedFromFolders: true,
+          projects: list
+        }).then(function () { return list; });
       });
     });
   }
@@ -370,18 +450,19 @@
         return withScopeRetry(function () {
           return ensureProjectsRootId().then(function (rootId) {
             return fetchJsonInFolder(rootId, "projects_index.json").then(function (data) {
-              let list = (data && Array.isArray(data.projects)) ? data.projects : [];
-              list = list.map(normalizeProjectRecord);
-              return migrateIntoSharedRootIfNeeded(rootId, list).then(function (migrated) {
-                list = (migrated && migrated.length) ? migrated.map(normalizeProjectRecord) : list;
-                if (!list.length) {
-                  list = defaultProjectsList().map(normalizeProjectRecord);
-                  return putJsonInFolder(rootId, "projects_index.json", {
-                    savedAt: new Date().toISOString(),
-                    projects: list
-                  }).then(function () { return list; });
-                }
-                return list;
+              let hint = (data && Array.isArray(data.projects)) ? data.projects.map(normalizeProjectRecord) : [];
+              return syncProjectsIndexFromDrive(rootId, hint).then(function (fromFolders) {
+                if (fromFolders && fromFolders.length) return fromFolders;
+                return migrateIntoSharedRootIfNeeded(rootId, hint).then(function (migrated) {
+                  return syncProjectsIndexFromDrive(rootId, migrated || hint).then(function (again) {
+                    if (again && again.length) return again;
+                    const list = defaultProjectsList().map(normalizeProjectRecord);
+                    return putJsonInFolder(rootId, "projects_index.json", {
+                      savedAt: new Date().toISOString(),
+                      projects: list
+                    }).then(function () { return list; });
+                  });
+                });
               });
             });
           });
@@ -846,37 +927,92 @@
     });
   }
 
-  function findChildFolder(parentId, name) {
-    const safe = name.replace(/'/g, "\\'");
+  function listChildFolders(parentId) {
     const q = encodeURIComponent(
-      "mimeType='application/vnd.google-apps.folder' and name='" + safe +
-      "' and '" + parentId + "' in parents and trashed=false"
+      "mimeType='application/vnd.google-apps.folder' and '" + parentIdOrRoot(parentId) +
+      "' in parents and trashed=false"
     );
     return driveFetch(
       "https://www.googleapis.com/drive/v3/files?q=" + q +
-      "&fields=files(id,name)&pageSize=1&spaces=drive" +
-      "&supportsAllDrives=true&includeItemsFromAllDrives=true"
+      "&fields=files(id,name,modifiedTime,createdTime)&pageSize=100&spaces=drive" +
+      "&supportsAllDrives=true&includeItemsFromAllDrives=true&orderBy=createdTime"
     ).then(function (res) {
-      if (!res.ok) return res.text().then(function (t) { throw new Error("搜尋資料夾失敗 " + res.status + " " + t); });
+      if (!res.ok) return res.text().then(function (t) { throw new Error("列出資料夾失敗 " + res.status + " " + t); });
       return res.json();
     }).then(function (data) {
-      return (data.files && data.files[0] && data.files[0].id) || "";
+      return (data && data.files) || [];
+    });
+  }
+
+  /** 同名多個資料夾：保留有 line_data.json 的（或最舊的），其餘進垃圾桶 */
+  function consolidateFolderGroup(folders) {
+    const list = folders || [];
+    if (!list.length) return Promise.resolve(null);
+    if (list.length === 1) return Promise.resolve(list[0]);
+    let chain = Promise.resolve([]);
+    list.forEach(function (f) {
+      chain = chain.then(function (acc) {
+        const safe = fileName().replace(/'/g, "\\'");
+        const q = "name='" + safe + "' and trashed=false and '" + f.id + "' in parents";
+        return driveListByQuery(q).then(function (files) {
+          acc.push({
+            folder: f,
+            hasData: !!(files && files.length),
+            dataModified: (files && files[0] && files[0].modifiedTime) || "",
+            createdTime: f.createdTime || ""
+          });
+          return acc;
+        });
+      });
+    });
+    return chain.then(function (infos) {
+      infos.sort(function (a, b) {
+        if (a.hasData !== b.hasData) return a.hasData ? -1 : 1;
+        const dm = String(b.dataModified || "").localeCompare(String(a.dataModified || ""));
+        if (dm) return dm;
+        return String(a.createdTime || "").localeCompare(String(b.createdTime || ""));
+      });
+      const keep = infos[0].folder;
+      return Promise.all(infos.slice(1).map(function (i) {
+        return trashDriveFile(i.folder.id);
+      })).then(function () { return keep; });
+    });
+  }
+
+  function findChildFolder(parentId, name) {
+    const want = normFolderKey(name);
+    if (!want) return Promise.resolve("");
+    // 先列全部子資料夾再比對（去空白），避免同名不同空白造成重複建立
+    return listChildFolders(parentId).then(function (folders) {
+      const hits = (folders || []).filter(function (f) {
+        return normFolderKey(f.name) === want;
+      });
+      if (!hits.length) return "";
+      if (hits.length === 1) return hits[0].id;
+      return consolidateFolderGroup(hits).then(function (best) {
+        return (best && best.id) || hits[0].id;
+      });
     });
   }
 
   function createChildFolder(parentId, name) {
-    const meta = {
-      name: name,
-      mimeType: "application/vnd.google-apps.folder",
-      parents: [parentId]
-    };
-    return driveFetch("https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id,name", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(meta)
-    }).then(function (res) {
-      if (!res.ok) return res.text().then(function (t) { throw new Error("建立資料夾失敗 " + res.status + " " + t); });
-      return res.json();
+    const label = sanitizeProjectFolderName(name);
+    // 建立前再查一次，防止競態重複
+    return findChildFolder(parentId, label).then(function (existing) {
+      if (existing) return { id: existing, name: label };
+      const meta = {
+        name: label,
+        mimeType: "application/vnd.google-apps.folder",
+        parents: [parentId]
+      };
+      return driveFetch("https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id,name", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(meta)
+      }).then(function (res) {
+        if (!res.ok) return res.text().then(function (t) { throw new Error("建立資料夾失敗 " + res.status + " " + t); });
+        return res.json();
+      });
     }).then(function (f) { return f.id; });
   }
 
@@ -902,10 +1038,7 @@
     let chain = sharedRoot ? Promise.resolve(sharedRoot) : Promise.resolve("root");
     walkParts.forEach(function (part) {
       chain = chain.then(function (parentId) {
-        return findChildFolder(parentId, part).then(function (id) {
-          if (id) return id;
-          return createChildFolder(parentId, part);
-        });
+        return ensureNamedChildFolder(parentId, part);
       });
     });
     return chain.then(function (id) {
@@ -917,7 +1050,7 @@
   function driveListByQuery(q) {
     return driveFetch(
       "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
-      "&fields=files(id,name,modifiedTime,parents)&pageSize=20&spaces=drive&orderBy=modifiedTime desc" +
+      "&fields=files(id,name,modifiedTime,parents)&pageSize=50&spaces=drive&orderBy=modifiedTime desc" +
       "&supportsAllDrives=true&includeItemsFromAllDrives=true"
     ).then(function (res) {
       if (!res.ok) return res.text().then(function (t) { throw new Error("搜尋雲端檔失敗 " + res.status + " " + t); });
