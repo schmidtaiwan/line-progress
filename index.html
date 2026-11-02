@@ -1566,7 +1566,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 61;
+const PAGE_BUILD = 62;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -2456,25 +2456,25 @@ async function ensureProjectsLoaded() {
     }
     state.projects = list || [];
     state.projectsError = "";
+    // 清單一到手就先畫左側（不要等 activate／總覽雲端載完才顯示）
+    state.projectsLoading = false;
+    renderProjectRail();
+
     const remembered = readRememberedProjectId();
     if (remembered === PROJECTS_OVERVIEW_ID) {
-      state.projectsLoading = false;
       await activateProjectsOverview({ fromCloud: true, skipConfirm: true });
       return;
     }
     let cur = state.projects.find(p => p.id === remembered) || state.projects[0];
-    if (!cur) {
-      renderProjectRail();
-      return;
-    }
+    if (!cur) return;
     await activateProject(cur, { skipConfirm: true, fromCloud: true });
   } catch (e) {
     console.warn(e);
     state.projectsError = String((e && e.message) || e || "載入失敗");
     toast("專案清單載入失敗：" + state.projectsError);
-    renderProjectRail();
   } finally {
     state.projectsLoading = false;
+    renderProjectRail();
   }
 }
 
