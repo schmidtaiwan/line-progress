@@ -24,8 +24,7 @@ window.GOOGLE_CONFIG = {
   projectsRoot: "架線進度專案",
 
   // 多帳號共用：填主帳號「架線進度專案」的資料夾 ID（空白＝各帳獨立）
-  // 例："1AbCDefGhIjKLmnOPQrsTUVwxYZ"
-  projectsRootId: "",
+  projectsRootId: "1kXxR9OFtjchcNzl-3mDEPcOeZAitAtAd",
 
   // 專案內統一檔名
   fileName: "line_data.json",
