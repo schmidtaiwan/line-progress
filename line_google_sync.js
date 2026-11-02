@@ -224,12 +224,50 @@
     if (activeProject) activeProject.spreadsheetId = id || "";
   }
 
+  function withTimeout(promise, ms, label) {
+    const limit = ms || 15000;
+    let timer = null;
+    const guarded = Promise.resolve(promise);
+    const timeout = new Promise(function (_resolve, reject) {
+      timer = setTimeout(function () {
+        reject(new Error((label || "操作") + "逾時（" + Math.round(limit / 1000) + "s）"));
+      }, limit);
+    });
+    return Promise.race([guarded, timeout]).then(
+      function (v) { clearTimeout(timer); return v; },
+      function (e) { clearTimeout(timer); throw e; }
+    );
+  }
+
   function sheetsFetch(url, options) {
     options = options || {};
+    const timeoutMs = options.timeoutMs != null ? options.timeoutMs : 20000;
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    let timer = null;
+    if (ctrl) {
+      timer = setTimeout(function () {
+        try { ctrl.abort(); } catch (e) {}
+      }, timeoutMs);
+    }
     const headers = Object.assign({}, options.headers || {}, {
       Authorization: "Bearer " + state.token
     });
-    return fetch(url, Object.assign({}, options, { headers: headers }));
+    const opts = Object.assign({}, options, { headers: headers });
+    delete opts.timeoutMs;
+    if (ctrl) opts.signal = ctrl.signal;
+    return fetch(url, opts).then(
+      function (res) {
+        if (timer) clearTimeout(timer);
+        return res;
+      },
+      function (err) {
+        if (timer) clearTimeout(timer);
+        if (err && err.name === "AbortError") {
+          throw new Error("Sheets API 逾時（" + Math.round(timeoutMs / 1000) + "s）");
+        }
+        throw err;
+      }
+    );
   }
 
   function quoteSheetRange(sheetName, a1) {
@@ -453,11 +491,29 @@
     return [n.meta, n.track, n.weekly, n.outlook, n.overview, n.photos].filter(Boolean);
   }
 
+  function findExistingProjectSpreadsheetId(proj) {
+    const p = proj || activeProject;
+    if (!p) return Promise.resolve("");
+    const key = projCacheKey(p);
+    const known = (p.spreadsheetId || (key && spreadsheetIdByProject[key]) || state.spreadsheetId || "").trim();
+    const title = projectSpreadsheetTitle(p);
+    if (known) {
+      rememberSpreadsheetId(known);
+      return Promise.resolve(known);
+    }
+    return ensureFolderId().then(function (folderId) {
+      if (p) p.folderId = folderId;
+      return findSpreadsheetInFolder(folderId, title).then(function (id) {
+        if (id) rememberSpreadsheetId(id);
+        if (id && p) p.spreadsheetId = id;
+        return id || "";
+      });
+    });
+  }
+
   function ensureProjectSpreadsheetId(proj) {
     const p = proj || activeProject;
     if (!p) return Promise.reject(new Error("尚未選擇專案"));
-    const key = projCacheKey(p);
-    const known = (p.spreadsheetId || (key && spreadsheetIdByProject[key]) || state.spreadsheetId || "").trim();
     const title = projectSpreadsheetTitle(p);
 
     function afterId(id) {
@@ -466,27 +522,10 @@
       return ensureSheetTabs(id, projectSheetTabNames()).then(function () { return id; });
     }
 
-    return ensureFolderId().then(function (folderId) {
-      if (p) p.folderId = folderId;
-      if (known) {
-        return sheetsFetch(
-          "https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(known) +
-          "?fields=spreadsheetId"
-        ).then(function (res) {
-          if (res.ok) return afterId(known);
-          return findSpreadsheetInFolder(folderId, title).then(function (id) {
-            if (id) return afterId(id);
-            return createSpreadsheetInFolder(folderId, title).then(afterId);
-          });
-        }).catch(function () {
-          return findSpreadsheetInFolder(folderId, title).then(function (id) {
-            if (id) return afterId(id);
-            return createSpreadsheetInFolder(folderId, title).then(afterId);
-          });
-        });
-      }
-      return findSpreadsheetInFolder(folderId, title).then(function (id) {
-        if (id) return afterId(id);
+    return findExistingProjectSpreadsheetId(p).then(function (existing) {
+      if (existing) return afterId(existing);
+      return ensureFolderId().then(function (folderId) {
+        if (p) p.folderId = folderId;
         return createSpreadsheetInFolder(folderId, title).then(afterId);
       });
     });
@@ -496,24 +535,51 @@
     const codec = global.LineSheetsCodec;
     if (!codec) return Promise.reject(new Error("缺少 LineSheetsCodec"));
     const names = codec.sheetNames();
-    const tabs = projectSheetTabNames();
-    return ensureSheetTabs(spreadsheetId, tabs).then(function () {
-      const aoaByName = {};
-      let chain = Promise.resolve();
-      tabs.forEach(function (name) {
-        chain = chain.then(function () {
-          return sheetsGetValues(spreadsheetId, name).then(function (aoa) {
-            aoaByName[name] = aoa;
-          });
-        });
-      });
-      return chain.then(function () {
-        const metaAoa = aoaByName[names.meta] || [];
-        const hasMeta = metaAoa.length > 1;
-        if (!hasMeta) return null;
+    // 先讀 _meta；有完整 payload 就夠用（加速總覽／切案）
+    return sheetsGetValues(spreadsheetId, names.meta).then(function (metaAoa) {
+      if (!metaAoa || metaAoa.length <= 1) return null;
+      const parsed = codec.parseMetaAoa(metaAoa);
+      if (parsed && parsed.payload && (
+        (Array.isArray(parsed.payload.equipment) && parsed.payload.equipment.length) ||
+        (Array.isArray(parsed.payload.nodes) && parsed.payload.nodes.length) ||
+        parsed.payload.title
+      )) {
+        return parsed.payload;
+      }
+      // meta 不完整時再讀清單表覆寫 equipment
+      return sheetsGetValues(spreadsheetId, names.track).then(function (trackAoa) {
+        const aoaByName = {};
+        aoaByName[names.meta] = metaAoa;
+        aoaByName[names.track] = trackAoa || [];
         return codec.sheetAoaMapToPayload(aoaByName, {});
       });
     });
+  }
+
+  const sheetsMigrateBusy = Object.create(null);
+
+  /** 背景把 JSON 寫入試算表（不阻塞載入） */
+  function scheduleSheetsMigrateFromLegacy(payload) {
+    if (!isSheetsMode() || !payload || !activeProject) return;
+    const key = projCacheKey(activeProject);
+    if (!key || sheetsMigrateBusy[key]) return;
+    sheetsMigrateBusy[key] = true;
+    const proj = activeProject;
+    const body = payload;
+    Promise.resolve()
+      .then(function () {
+        return withScopeRetry(function () {
+          return ensureProjectSpreadsheetId(proj).then(function (sid) {
+            return writePayloadToSheets(sid, body).then(function () {
+              rememberSpreadsheetId(sid);
+              if (proj) proj.spreadsheetId = sid;
+              return persistSpreadsheetIdToIndex(proj);
+            });
+          });
+        });
+      })
+      .catch(function (e) { console.warn("背景 Sheets 遷移失敗", e); })
+      .then(function () { delete sheetsMigrateBusy[key]; });
   }
 
   function writePayloadToSheets(spreadsheetId, payload) {
@@ -2142,26 +2208,30 @@
         return withScopeRetry(function () {
           if (!isSheetsMode()) return downloadJsonLegacy();
 
-          return ensureProjectSpreadsheetId(activeProject).then(function (sid) {
-            return readPayloadFromSheets(sid).then(function (fromSheets) {
-              if (fromSheets) {
-                state.lastCloudAt = fromSheets.savedAt || new Date().toISOString();
-                return fromSheets;
+          // ★ 讀取優先 JSON（快）；Sheets 遷移改背景，避免總覽卡住數分鐘
+          return downloadJsonLegacy().then(function (legacy) {
+            if (legacy) {
+              state.lastCloudAt = legacy.savedAt || new Date().toISOString();
+              scheduleSheetsMigrateFromLegacy(legacy);
+              return legacy;
+            }
+            return findExistingProjectSpreadsheetId(activeProject).then(function (sid) {
+              if (!sid) {
+                if (isSharedProjectsRoot()) return null;
+                return findLegacyData();
               }
-              // 一次性：從舊 line_data.json 遷移到試算表
-              return downloadJsonLegacy().then(function (legacy) {
-                if (!legacy) {
-                  if (isSharedProjectsRoot()) return null;
-                  return findLegacyData();
-                }
-                return writePayloadToSheets(sid, legacy).then(function () {
-                  rememberSpreadsheetId(sid);
-                  return persistSpreadsheetIdToIndex(activeProject).then(function () {
-                    state.lastCloudAt = new Date().toISOString();
-                    return legacy;
-                  });
+              return withTimeout(readPayloadFromSheets(sid), 20000, "讀取試算表")
+                .then(function (fromSheets) {
+                  if (fromSheets) {
+                    state.lastCloudAt = fromSheets.savedAt || new Date().toISOString();
+                    return fromSheets;
+                  }
+                  return null;
+                })
+                .catch(function (e) {
+                  console.warn(e);
+                  return null;
                 });
-              });
             });
           });
         });

@@ -1592,12 +1592,12 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=71"></script>
+<script src="google_config.js?v=72"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
 <script src="line_sheets_codec.js?v=71"></script>
-<script src="line_google_sync.js?v=71"></script>
+<script src="line_google_sync.js?v=72"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 let STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1619,7 +1619,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 71;
+const PAGE_BUILD = 72;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -2544,8 +2544,19 @@ async function ensureProjectsLoaded() {
 
     const remembered = readRememberedProjectId();
     if (remembered === PROJECTS_OVERVIEW_ID) {
+      // 先用本機快取畫出總覽（避免 Sheets／逐案遷移卡住登入畫面）
       updateBootLoadPhase("載入專案總覽…");
-      await activateProjectsOverview({ fromCloud: true, skipConfirm: true });
+      await activateProjectsOverview({ fromCloud: false, skipConfirm: true });
+      // 背景再拉雲端，不擋 boot 結束
+      Promise.resolve().then(async () => {
+        try {
+          const snaps = await loadOverviewSnapshots({ fromCloud: true });
+          if (isProjectsOverview()) {
+            state.overviewSnapshots = snaps;
+            render();
+          }
+        } catch (e) { console.warn(e); }
+      });
       return;
     }
     let cur = state.projects.find(p => p.id === remembered) || state.projects[0];
@@ -4022,29 +4033,31 @@ function readLocalProjectSnapshot(proj) {
 async function loadOverviewSnapshots(opts) {
   opts = opts || {};
   const list = state.projects || [];
-  const snaps = [];
-  const prevActive = (window.LineOneDrive && typeof LineOneDrive.getActiveProject === "function")
+  const snaps = list.map(proj => readLocalProjectSnapshot(proj));
+  if (!(opts.fromCloud && window.LineOneDrive && isCloudLoggedIn())) return snaps;
+
+  const prevActive = (typeof LineOneDrive.getActiveProject === "function")
     ? LineOneDrive.getActiveProject()
     : null;
+  // 逐案拉取（JSON 優先）；單案失敗不影響其他案
   for (let i = 0; i < list.length; i++) {
     const proj = list[i];
-    let snap = readLocalProjectSnapshot(proj);
-    if (opts.fromCloud && window.LineOneDrive && isCloudLoggedIn()) {
-      try {
-        LineOneDrive.setActiveProject(proj);
-        const cloud = await LineOneDrive.downloadJson();
-        if (cloud && (Array.isArray(cloud.nodes) || Array.isArray(cloud.equipment))) {
-          snap = snapshotFromPayload(proj, cloud);
-          if (proj) proj.arch = "unified";
-          try { localStorage.setItem(storeKeyForProject(proj), JSON.stringify(cloud)); } catch (e) {}
-        }
-      } catch (e) {
-        console.warn(e);
+    try {
+      if (typeof updateBootLoadPhase === "function" && state.bootLoading) {
+        updateBootLoadPhase("雲端同步「" + (proj.name || "") + "」（" + (i + 1) + "/" + list.length + "）…");
       }
+      LineOneDrive.setActiveProject(proj);
+      const cloud = await LineOneDrive.downloadJson();
+      if (cloud && (Array.isArray(cloud.nodes) || Array.isArray(cloud.equipment))) {
+        snaps[i] = snapshotFromPayload(proj, cloud);
+        if (proj) proj.arch = "unified";
+        try { localStorage.setItem(storeKeyForProject(proj), JSON.stringify(cloud)); } catch (e) {}
+      }
+    } catch (e) {
+      console.warn(e);
     }
-    snaps.push(snap);
   }
-  if (prevActive && window.LineOneDrive && typeof LineOneDrive.setActiveProject === "function" && prevActive.id) {
+  if (prevActive && typeof LineOneDrive.setActiveProject === "function" && prevActive.id) {
     try { LineOneDrive.setActiveProject(prevActive); } catch (e) {}
   }
   return snaps;
