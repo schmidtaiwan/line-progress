@@ -75,22 +75,45 @@
   header.top .top-right {
     display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
   }
-  header.top .top-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-  header.top .btn-export-top,
-  header.top .btn-import-top {
+  header.top .top-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+  header.top .icon-hover-btn {
     appearance: none;
+    display: inline-flex; align-items: center; justify-content: flex-start;
+    box-sizing: border-box;
+    width: 36px; height: 36px; min-width: 36px; max-width: 100%;
     border: 1px solid rgba(255,255,255,0.28);
     background: rgba(255,255,255,0.12);
     color: #fff;
-    border-radius: 8px;
-    padding: 7px 12px;
-    font: inherit;
-    font-size: 14px;
-    font-weight: 650;
+    border-radius: 10px;
+    padding: 0 9px;
+    font: inherit; font-size: 13px; font-weight: 650;
     cursor: pointer;
+    overflow: hidden; white-space: nowrap;
+    transition: width 0.18s ease, background 0.15s, border-color 0.15s;
   }
-  header.top .btn-export-top:hover,
-  header.top .btn-import-top:hover { background: rgba(255,255,255,0.2); }
+  header.top .icon-hover-btn .ico {
+    flex: 0 0 18px; width: 18px; text-align: center; line-height: 1; font-size: 15px;
+  }
+  header.top .icon-hover-btn .lbl {
+    display: inline-block; max-width: 0; opacity: 0; overflow: hidden;
+    margin-left: 0; transition: max-width 0.18s ease, opacity 0.15s ease, margin-left 0.15s ease;
+  }
+  header.top .icon-hover-btn:hover,
+  header.top .icon-hover-btn:focus-visible {
+    width: auto; min-width: 36px;
+    background: rgba(255,255,255,0.22);
+    outline: none;
+  }
+  header.top .icon-hover-btn:hover .lbl,
+  header.top .icon-hover-btn:focus-visible .lbl {
+    max-width: 120px; opacity: 1; margin-left: 8px;
+  }
+  header.top .icon-hover-btn.settings {
+    border-color: rgba(255,255,255,0.45);
+    background: #2a6f97;
+  }
+  header.top .icon-hover-btn.settings:hover,
+  header.top .icon-hover-btn.settings:focus-visible { background: #3483b0; }
   header.top .export-wrap,
   header.top .import-wrap { position: relative; }
   header.top .export-menu,
@@ -146,19 +169,6 @@
     color: var(--ink);
     border-color: transparent;
   }
-  header.top .btn-settings-top {
-    appearance: none;
-    border: 1px solid rgba(255,255,255,0.45);
-    background: #2a6f97;
-    color: #fff;
-    border-radius: 8px;
-    padding: 7px 12px;
-    font: inherit;
-    font-size: 14px;
-    font-weight: 700;
-    cursor: pointer;
-  }
-  header.top .btn-settings-top:hover { background: #3483b0; }
   .map-toolbar {
     display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
     margin-bottom: 14px;
@@ -836,6 +846,43 @@
     align-items: center;
   }
   .cloud-bar .msg { flex: 1; min-width: 180px; }
+  .cloud-bar .icon-hover-btn {
+    display: inline-flex; align-items: center; justify-content: flex-start;
+    box-sizing: border-box;
+    width: 36px; height: 36px; min-width: 36px; max-width: 100%;
+    border: 1px solid #2b6cb0;
+    background: #2b6cb0;
+    color: #fff;
+    border-radius: 10px;
+    padding: 0 9px;
+    cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 700;
+    overflow: hidden; white-space: nowrap;
+    transition: width 0.18s ease, background 0.15s, border-color 0.15s;
+  }
+  .cloud-bar .icon-hover-btn .ico {
+    flex: 0 0 18px; width: 18px; text-align: center; line-height: 1; font-size: 15px;
+  }
+  .cloud-bar .icon-hover-btn .lbl {
+    display: inline-block; max-width: 0; opacity: 0; overflow: hidden;
+    margin-left: 0; transition: max-width 0.18s ease, opacity 0.15s ease, margin-left 0.15s ease;
+  }
+  .cloud-bar .icon-hover-btn:hover,
+  .cloud-bar .icon-hover-btn:focus-visible {
+    width: auto; min-width: 36px;
+    background: #245a94; border-color: #245a94; outline: none;
+  }
+  .cloud-bar .icon-hover-btn:hover .lbl,
+  .cloud-bar .icon-hover-btn:focus-visible .lbl {
+    max-width: 100px; opacity: 1; margin-left: 8px;
+  }
+  .cloud-bar .icon-hover-btn.dirty {
+    background: #c05621; border-color: #c05621;
+  }
+  .cloud-bar .icon-hover-btn.dirty:hover,
+  .cloud-bar .icon-hover-btn.dirty:focus-visible {
+    background: #a04518; border-color: #a04518;
+  }
   .viewer-badge {
     display: inline-flex;
     align-items: center;
@@ -1263,12 +1310,15 @@
       font-size: 15px;
     }
     .cloud-bar .msg { min-width: 0; font-size: 14px; line-height: 1.45; }
-    .cloud-bar .btn-cloud, .cloud-bar .viewer-badge {
+    .cloud-bar .btn-cloud:not(.icon-hover-btn), .cloud-bar .viewer-badge {
       width: 100%;
       justify-content: center;
       text-align: center;
       padding: 12px 14px;
       font-size: 16px;
+    }
+    .cloud-bar .icon-hover-btn {
+      align-self: flex-end;
     }
     .toolbar { flex-direction: column; align-items: stretch; gap: 10px; }
     .chips { width: 100%; }
@@ -1570,7 +1620,8 @@
   .project-rail .rail-icon-btn:disabled {
     opacity: 0.55; cursor: wait;
   }
-  .cloud-bar .btn-cloud[data-cloud-push] { margin-left: auto; }
+  .cloud-bar .btn-cloud[data-cloud-push],
+  .cloud-bar .icon-hover-btn[data-cloud-push] { margin-left: auto; }
   .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   body.locked .project-rail { display: none; }
   .sheets-embed-wrap {
@@ -1612,9 +1663,9 @@
     <div class="top-right">
       <span class="page-ver" id="pageVer">版次 —</span>
       <div class="top-actions">
-        <button type="button" class="btn-settings-top" data-open-settings title="製程段／階段／時程設定">⚙ 設定</button>
+        <button type="button" class="icon-hover-btn settings" data-open-settings title="製程段／階段／時程設定"><span class="ico">⚙</span><span class="lbl">設定</span></button>
         <div class="import-wrap">
-          <button type="button" class="btn-import-top" data-import-menu title="匯入 Excel／JSON／雲端歷史">📥 匯入 ▾</button>
+          <button type="button" class="icon-hover-btn" data-import-menu title="匯入 Excel／JSON／雲端歷史"><span class="ico">📥</span><span class="lbl">匯入</span></button>
           <div class="import-menu" id="importMenu">
             <button type="button" data-import-xlsx>📊 匯入 Excel</button>
             <button type="button" data-import-json title="匯入 line_data.json（會覆寫目前專案）">📄 匯入專案 JSON</button>
@@ -1624,7 +1675,7 @@
         <input type="file" id="importXlsxInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
         <input type="file" id="importJsonInput" accept=".json,application/json" hidden>
         <div class="export-wrap">
-          <button type="button" class="btn-export-top" data-export-menu title="匯出到本機／雲端歷史">📤 匯出 ▾</button>
+          <button type="button" class="icon-hover-btn" data-export-menu title="匯出到本機／雲端歷史"><span class="ico">📤</span><span class="lbl">匯出</span></button>
           <div class="export-menu" id="exportMenu">
             <button type="button" data-export-local="excel">📊 匯出 Excel</button>
             <button type="button" data-export-local="pdf">📄 匯出 PDF</button>
@@ -1744,7 +1795,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 89;
+const PAGE_BUILD = 90;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -3536,7 +3587,7 @@ function updateRailCloud() {
 
 function cloudBarHtml() {
   const logged = isCloudLoggedIn();
-  const saveCls = "btn-cloud" + (state.dirty ? " dirty" : "");
+  const saveCls = "icon-hover-btn" + (state.dirty ? " dirty" : "");
   const saveLabel = state.dirty ? "儲存＊" : "儲存";
   const msg = escapeHtml(window.LineOneDrive ? LineOneDrive.statusText() : "雲端模組未載入");
   // 未登入時左側專案列隱藏，登入鈕必須留在 cloud bar（登入閘道）
@@ -3548,7 +3599,7 @@ function cloudBarHtml() {
   }
   return `<div class="cloud-bar" id="cloudBar">
       <span class="msg">${msg}</span>
-      <button type="button" class="${saveCls}" data-cloud-push title="只儲存目前專案到雲端">💾 ${saveLabel}</button>
+      <button type="button" class="${saveCls}" data-cloud-push title="只儲存目前專案到雲端"><span class="ico">💾</span><span class="lbl">${saveLabel}</span></button>
     </div>`;
 }
 function updateCloudBar() {
@@ -3566,7 +3617,9 @@ function updateCloudBar() {
   if (msg) msg.textContent = LineOneDrive.statusText();
   const saveBtn = el.querySelector("[data-cloud-push]");
   if (saveBtn) {
-    saveBtn.textContent = state.dirty ? "💾 儲存＊" : "💾 儲存";
+    const lbl = saveBtn.querySelector(".lbl");
+    if (lbl) lbl.textContent = state.dirty ? "儲存＊" : "儲存";
+    else saveBtn.textContent = state.dirty ? "💾 儲存＊" : "💾 儲存";
     saveBtn.classList.toggle("dirty", !!state.dirty);
   }
 }
@@ -7442,6 +7495,7 @@ document.body.addEventListener("click", ev => {
   const reportPeriodBtn = ev.target.closest("[data-report-period]");
   if (reportPeriodBtn) {
     state.reportPeriod = reportPeriodBtn.dataset.reportPeriod || "today";
+    if (state.reportPeriod === "custom") ensureReportCustomDates();
     if (state.tab === "weekly") renderWeekly();
     else render();
     return;
