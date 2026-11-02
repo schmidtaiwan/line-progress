@@ -1606,7 +1606,6 @@
   <p id="subtitle"></p>
   <nav class="tabs" id="tabs">
     <button data-tab="weekly" class="active"><span class="tab-full">報表</span><span class="tab-short">報表</span></button>
-    <button data-tab="overview"><span class="tab-full">總覽</span><span class="tab-short">總覽</span></button>
     <button data-tab="items"><span class="tab-full">清單</span><span class="tab-short">清單</span></button>
     <button data-tab="map"><span class="tab-full">總圖</span><span class="tab-short">總圖</span></button>
     <button data-tab="sheets"><span class="tab-full">試算表</span><span class="tab-short">Sheets</span></button>
@@ -1687,7 +1686,7 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=83"></script>
+<script src="google_config.js?v=85"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
@@ -1714,7 +1713,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 83;
+const PAGE_BUILD = 85;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -4540,10 +4539,45 @@ function renderHierarchySettings() {
     </div>`;
 }
 
+/** 顯示／計算皆以台灣時間 Asia/Taipei（UTC+8） */
+function formatTaiwanDateTime(raw) {
+  const t = raw instanceof Date ? raw.getTime() : Date.parse(raw);
+  if (!Number.isFinite(t)) return "";
+  try {
+    const parts = {};
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).formatToParts(new Date(t)).forEach(function (p) {
+      if (p.type !== "literal") parts[p.type] = p.value;
+    });
+    let hh = parts.hour || "00";
+    if (hh === "24") hh = "00";
+    return parts.year + "-" + parts.month + "-" + parts.day + " " + hh + ":" + parts.minute;
+  } catch (e) {
+    const d = new Date(t + 8 * 60 * 60 * 1000);
+    const p = function (n) { return String(n).padStart(2, "0"); };
+    return d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate()) +
+      " " + p(d.getUTCHours()) + ":" + p(d.getUTCMinutes());
+  }
+}
+
 function todayIsoDate() {
-  const n = new Date();
-  const p = function (x) { return String(x).padStart(2, "0"); };
-  return n.getFullYear() + "-" + p(n.getMonth() + 1) + "-" + p(n.getDate());
+  return formatTaiwanDateTime(Date.now()).slice(0, 10);
+}
+
+function addDaysYmd(ymd, days) {
+  const t = Date.parse(ymd + "T12:00:00+08:00") + days * 86400000;
+  return formatTaiwanDateTime(t).slice(0, 10);
+}
+
+function taiwanWeekdaySun0(ymd) {
+  return new Date(ymd + "T12:00:00+08:00").getUTCDay();
 }
 
 function ensureReportCustomDates() {
@@ -4556,37 +4590,50 @@ function ensureReportCustomDates() {
   }
 }
 
-/** 報表：今日／本週（週一～日）／本月／自選區間 */
+/** 報表：今日／本週（週一～日）／本月／自選區間（皆以台灣日曆日） */
 function reportPeriodRange(period) {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const d = now.getDate();
-  let start;
-  let end;
+  let fromYmd;
+  let toYmd;
   if (period === "custom") {
     ensureReportCustomDates();
-    const fromIso = normalizeDateValue(state.reportCustomFrom) || todayIsoDate();
-    const toIso = normalizeDateValue(state.reportCustomTo) || fromIso;
-    start = new Date(fromIso + "T00:00:00");
-    end = new Date(toIso + "T23:59:59.999");
+    fromYmd = normalizeDateValue(state.reportCustomFrom) || todayIsoDate();
+    toYmd = normalizeDateValue(state.reportCustomTo) || fromYmd;
   } else if (period === "month") {
-    start = new Date(y, m, 1);
-    end = new Date(y, m + 1, 0, 23, 59, 59, 999);
+    const today = todayIsoDate();
+    const y = Number(today.slice(0, 4));
+    const m = Number(today.slice(5, 7));
+    fromYmd = today.slice(0, 8) + "01";
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    toYmd = today.slice(0, 8) + String(last).padStart(2, "0");
   } else if (period === "week") {
-    const day = now.getDay();
-    const mondayOffset = day === 0 ? -6 : 1 - day;
-    start = new Date(y, m, d + mondayOffset);
-    end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6, 23, 59, 59, 999);
+    const today = todayIsoDate();
+    const dow = taiwanWeekdaySun0(today);
+    const mondayOffset = dow === 0 ? -6 : 1 - dow;
+    fromYmd = addDaysYmd(today, mondayOffset);
+    toYmd = addDaysYmd(fromYmd, 6);
   } else {
-    start = new Date(y, m, d);
-    end = new Date(y, m, d, 23, 59, 59, 999);
+    fromYmd = todayIsoDate();
+    toYmd = fromYmd;
   }
-  return { start: start.getTime(), end: end.getTime(), startDate: start, endDate: end };
+  const start = Date.parse(fromYmd + "T00:00:00+08:00");
+  const end = Date.parse(toYmd + "T23:59:59.999+08:00");
+  return {
+    start: start,
+    end: end,
+    startDate: new Date(start),
+    endDate: new Date(end),
+    fromYmd: fromYmd,
+    toYmd: toYmd
+  };
 }
 
-function fmtReportDay(d) {
-  return (d.getMonth() + 1) + "/" + d.getDate();
+function fmtReportDay(ymdOrDate) {
+  if (typeof ymdOrDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(ymdOrDate)) {
+    return Number(ymdOrDate.slice(5, 7)) + "/" + Number(ymdOrDate.slice(8, 10));
+  }
+  const s = formatTaiwanDateTime(ymdOrDate);
+  if (!s) return "-";
+  return Number(s.slice(5, 7)) + "/" + Number(s.slice(8, 10));
 }
 
 function collectProgressUpdates(period, equipmentList, projectName) {
@@ -4651,7 +4698,7 @@ function buildProgressUpdatesHtml(opts) {
   if (period === "custom") ensureReportCustomDates();
   const customFrom = escapeAttr(state.reportCustomFrom || todayIsoDate());
   const customTo = escapeAttr(state.reportCustomTo || state.reportCustomFrom || todayIsoDate());
-  const rangeTxt = fmtReportDay(pack.range.startDate) + " ~ " + fmtReportDay(pack.range.endDate);
+  const rangeTxt = fmtReportDay(pack.range.fromYmd || pack.range.startDate) + " ~ " + fmtReportDay(pack.range.toYmd || pack.range.endDate);
   const showProj = !!opts.overview;
   const colSpan = showProj ? 8 : 7;
   const headProj = showProj ? "<th>專案</th>" : "";
@@ -4659,7 +4706,7 @@ function buildProgressUpdatesHtml(opts) {
     ? pack.rows.map(function (r) {
         const projTd = showProj ? `<td>${escapeHtml(r.project || "—")}</td>` : "";
         return `<tr>
-          <td>${escapeHtml(String(r.at || "").replace("T", " ").slice(0, 16))}</td>
+          <td>${escapeHtml(formatTaiwanDateTime(r.at))}</td>
           ${projTd}
           <td>${escapeHtml(r.eq)}</td>
           <td>${escapeHtml(r.stage)}</td>
@@ -4673,7 +4720,7 @@ function buildProgressUpdatesHtml(opts) {
   const cards = pack.rows.length
     ? pack.rows.map(function (r) {
         return `<article class="m-eq-card">
-          <div class="m-title">${escapeHtml(String(r.at || "").replace("T", " ").slice(0, 16))}　${escapeHtml(r.eq)}</div>
+          <div class="m-title">${escapeHtml(formatTaiwanDateTime(r.at))}　${escapeHtml(r.eq)}</div>
           ${showProj ? `<div class="m-field"><label>專案</label><div>${escapeHtml(r.project || "—")}</div></div>` : ""}
           <div class="m-field"><label>階段／細項</label><div>${escapeHtml(r.stage)}　${escapeHtml(r.item)}</div></div>
           <div class="m-field"><label>完成率</label><div class="pct-delta">${formatPctRatio(r.fromPct)} → ${formatPctRatio(r.toPct)}</div></div>
@@ -4966,7 +5013,7 @@ function progressLogHtml(it, idx) {
   const list = logs.length
     ? `<ul class="prog-log-list">${logs.map(function (e) {
         return `<li>
-          <div class="prog-log-meta">${escapeHtml(String(e.at || "").replace("T", " ").slice(0, 16))}　${formatPctRatio(e.fromPct)} → ${formatPctRatio(e.toPct)}${e.by ? "　" + escapeHtml(e.by) : ""}</div>
+          <div class="prog-log-meta">${escapeHtml(formatTaiwanDateTime(e.at))}　${formatPctRatio(e.fromPct)} → ${formatPctRatio(e.toPct)}${e.by ? "　" + escapeHtml(e.by) : ""}</div>
           <div class="prog-log-work">${escapeHtml(e.work || "（未填工作內容）")}</div>
         </li>`;
       }).join("")}</ul>`
@@ -5497,6 +5544,7 @@ function render() {
   document.getElementById("subtitle").textContent = DATA.subtitle;
   updateFoot();
   renderProjectRail();
+  if (state.tab === "overview") state.tab = "items";
   document.querySelectorAll("nav.tabs button").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.tab === state.tab);
     if (isProjectsOverview() && btn.dataset.tab !== "weekly") {
@@ -6804,7 +6852,7 @@ function hideHistoryModal() {
 
 function fmtHistTime(iso) {
   if (!iso) return "—";
-  return String(iso).replace("T", " ").replace(/\.\d+Z?$/, "").slice(0, 19);
+  return formatTaiwanDateTime(iso) || "—";
 }
 
 async function saveCloudHistory() {
