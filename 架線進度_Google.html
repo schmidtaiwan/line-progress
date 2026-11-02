@@ -1540,7 +1540,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "" };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1551,7 +1551,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 45;
+const PAGE_BUILD = 46;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -2032,9 +2032,29 @@ function cloudPayload() {
   };
 }
 
+/** 依登入帳號隔離本機快取（不同 Google 帳號不可共用專案暫存） */
+function accountScopeKey() {
+  try {
+    if (window.LineOneDrive && typeof LineOneDrive.accountEmail === "function") {
+      const e = LineOneDrive.accountEmail();
+      if (e) return String(e).replace(/[^\w.@+-]+/g, "_");
+    }
+    const a = window.LineOneDrive && LineOneDrive.state && LineOneDrive.state.account;
+    const email = (a && (a.email || a.username)) || state.cloudAccount || "";
+    return String(email).trim().toLowerCase().replace(/[^\w.@+-]+/g, "_") || "anon";
+  } catch (e) {
+    return "anon";
+  }
+}
+
+function projectsMetaKey() {
+  return PROJECTS_STORE + "_" + accountScopeKey();
+}
+
 function storeKeyForProject(proj) {
   const pid = (proj && (proj.id || proj.name)) || "default";
-  return "vivo_line_dash_" + String(pid).replace(/[^\w\-]+/g, "_") + "_" + (BASE.source || "default");
+  const who = accountScopeKey();
+  return "vivo_line_dash_" + who + "_" + String(pid).replace(/[^\w\-]+/g, "_") + "_" + (BASE.source || "default");
 }
 
 function setStoreKeyForProject(proj) {
@@ -2042,18 +2062,39 @@ function setStoreKeyForProject(proj) {
 }
 
 function rememberActiveProjectId(id) {
-  try { localStorage.setItem(PROJECTS_STORE, JSON.stringify({ activeId: id || "" })); } catch (e) {}
+  try { localStorage.setItem(projectsMetaKey(), JSON.stringify({ activeId: id || "" })); } catch (e) {}
 }
 
 function readRememberedProjectId() {
   try {
-    const raw = localStorage.getItem(PROJECTS_STORE);
+    const raw = localStorage.getItem(projectsMetaKey());
     if (!raw) return "";
     const o = JSON.parse(raw);
     return (o && o.activeId) || "";
   } catch (e) {
     return "";
   }
+}
+
+function resetWorkspaceForAccountSwitch() {
+  state.projects = [];
+  state.project = null;
+  state.projectsError = "";
+  state.projectsLoading = false;
+  state.dirty = false;
+  state.overviewSnapshots = [];
+  state.overviewLoading = false;
+  state.openRemark = null;
+  state.openDates = null;
+  state.openHierRemark = null;
+  state.eq = 0;
+  state.stage = 0;
+  state.weeklyPanel = "gantt";
+  state.tab = "weekly";
+  applyProjectPayload(blankProjectPayload("（請選擇專案）", "equipment"));
+  DATA.title = "架線進度";
+  DATA.subtitle = "已切換帳號，正在載入此帳號的專案…";
+  STORE_KEY = "vivo_line_dash_" + accountScopeKey() + "_pending_" + (BASE.source || "default");
 }
 
 function applyProjectPayload(saved) {
@@ -2241,6 +2282,10 @@ function renderProjectRail() {
   const curId = state.project && state.project.id;
   const overviewOn = curId === PROJECTS_OVERVIEW_ID ? "on" : "";
   let html = `<button type="button" class="proj-btn overview-btn ${overviewOn}" data-projects-overview title="各專案周報與合併總表">專案總覽</button>`;
+  const who = isCloudLoggedIn() ? accountScopeKey() : "";
+  if (who && who !== "anon") {
+    html += `<p class="rail-hint" title="專案清單來自此帳號的「我的雲端硬碟／架線進度專案」">帳號：${escapeHtml(who)}</p>`;
+  }
   if (state.projectsLoading) {
     host.innerHTML = html + `<p class="rail-hint">載入專案中…</p>`;
     return;
@@ -2271,11 +2316,17 @@ async function ensureProjectsLoaded() {
   if (!window.LineOneDrive || !isCloudLoggedIn()) return;
   if (typeof LineOneDrive.loadProjectsIndex !== "function") return;
   if (state.projectsLoading) return;
+  state.cloudAccount = accountScopeKey();
   state.projectsLoading = true;
   state.projectsError = "";
   renderProjectRail();
   try {
+    // 專案清單來自「目前登入帳號」的 Drive：架線進度專案/projects_index.json
     const list = await LineOneDrive.loadProjectsIndex();
+    // 若載入中途又換帳，丟棄結果
+    if (state.cloudAccount && state.cloudAccount !== accountScopeKey()) {
+      return;
+    }
     state.projects = list || [];
     state.projectsError = "";
     const remembered = readRememberedProjectId();
@@ -5459,12 +5510,22 @@ function patchItemField(itemIdx, field, raw) {
 async function cloudLogin() {
   try {
     toast("正在登入…");
+    const prevAccount = state.cloudAccount || "";
     // 已登入時按「重新登入」才跳出選帳戶；首次登入也可選帳
     await LineOneDrive.login({ switchAccount: true });
-    toast("已登入雲端");
+    const nextAccount = accountScopeKey();
+    // 換帳：清掉舊帳左側清單與本機畫面，再載入新帳號雲端專案
+    if (prevAccount && nextAccount && prevAccount !== nextAccount) {
+      resetWorkspaceForAccountSwitch();
+      renderProjectRail();
+      toast("已切換為 " + nextAccount + "，載入此帳號專案…");
+    } else {
+      toast("已登入雲端");
+    }
+    state.cloudAccount = nextAccount;
     startCloudWatch();
-          hideSyncConflict();
-    // 登入後載入專案清單並切到作用中專案（含雲端進度）
+    hideSyncConflict();
+    // 登入後載入「此帳號」專案清單並切到作用中專案（含雲端進度）
     try {
       await ensureProjectsLoaded();
     } catch (e2) {
@@ -5695,6 +5756,8 @@ document.body.addEventListener("click", ev => {
     stopCloudWatch();
     hideSyncConflict();
     LineOneDrive.logout().then(() => {
+      resetWorkspaceForAccountSwitch();
+      state.cloudAccount = "";
       toast("已登出");
       document.body.classList.add("locked");
       render();

@@ -442,6 +442,11 @@
     return (state.account && (state.account.email || state.account.username)) || "";
   }
 
+  /** 目前登入帳號（小寫 email），未登入回空字串 */
+  function accountEmail() {
+    return String(accountHint() || "").trim().toLowerCase();
+  }
+
   function fetchUserEmail(token) {
     return fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
       headers: { Authorization: "Bearer " + token }
@@ -462,10 +467,13 @@
   function login(opts) {
     opts = opts || {};
     const switchAccount = !!opts.switchAccount;
+    const prevEmail = accountEmail();
     state.token = "";
     if (switchAccount) {
       cachedFolderId = "";
-      saveStoredFileId("");
+      state.fileId = "";
+      activeProject = null;
+      try { saveStoredFileId(""); } catch (e) {}
     }
     const prompt = switchAccount
       ? "select_account consent"
@@ -473,6 +481,12 @@
     const hint = switchAccount ? "" : (opts.hint || accountHint());
     return requestToken(prompt, hint).then(function (tok) {
       return fetchUserEmail(tok).then(function (acc) {
+        const nextEmail = accountEmail();
+        // 換帳後清掉舊帳的資料夾／檔案快取，強制走新帳號的「我的雲端硬碟」
+        if (switchAccount || (prevEmail && nextEmail && prevEmail !== nextEmail)) {
+          clearFolderCache();
+          activeProject = null;
+        }
         startPresence();
         return acc;
       });
@@ -488,6 +502,7 @@
       state.account = null;
       state.fileId = "";
       cachedFolderId = "";
+      activeProject = null;
       state.viewers = 0;
       state.viewerList = [];
       notifyViewers();
@@ -1200,6 +1215,7 @@
     ensureInit: ensureInit,
     login: login,
     logout: logout,
+    accountEmail: accountEmail,
     downloadJson: downloadJson,
     uploadJson: uploadJson,
     scheduleUpload: scheduleUpload,
