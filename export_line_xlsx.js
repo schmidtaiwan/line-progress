@@ -736,10 +736,13 @@
     return map;
   }
 
-  /** 解析「架線項目清單管控」矩陣 → equipment[] */
-  function parseTrackSheet(ws, stageCount, prevEquipment) {
-    var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
-    if (!aoa.length) throw new Error("清單工作表是空的");
+  function sheetToAoa(ws) {
+    return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+  }
+
+  /** 解析清單矩陣 AOA → equipment[]（Sheets／XLSX 共用） */
+  function parseTrackFromAoa(aoa, stageCount, prevEquipment) {
+    if (!aoa || !aoa.length) throw new Error("清單工作表是空的");
     var headerRow = -1;
     for (var r = 0; r < Math.min(10, aoa.length); r++) {
       var a = cellStr(aoa[r][0]);
@@ -817,10 +820,13 @@
     return equipment;
   }
 
-  /** 從總覽表讀各製程段五階段預計完成時間 */
-  function parseMilestones(ws, segOrder, stageCount) {
-    if (!ws) return null;
-    var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+  /** 解析「架線項目清單管控」矩陣 → equipment[] */
+  function parseTrackSheet(ws, stageCount, prevEquipment) {
+    return parseTrackFromAoa(sheetToAoa(ws), stageCount, prevEquipment);
+  }
+
+  function parseMilestonesFromAoa(aoa, segOrder, stageCount) {
+    if (!aoa || !aoa.length) return null;
     var out = [];
     var nStages = stageCount || 5;
     for (var r = 0; r < aoa.length; r++) {
@@ -832,6 +838,17 @@
     }
     return out.length ? out : null;
   }
+
+  /** 從總覽表讀各製程段五階段預計完成時間 */
+  function parseMilestones(ws, segOrder, stageCount) {
+    if (!ws) return null;
+    return parseMilestonesFromAoa(sheetToAoa(ws), segOrder, stageCount);
+  }
+
+  function buildTrackAoa(DATA) { return sheetToAoa(buildTrack(DATA)); }
+  function buildWeeklyAoa(DATA) { return sheetToAoa(buildWeekly(DATA)); }
+  function buildOutlookAoa(DATA) { return sheetToAoa(buildOutlook(DATA)); }
+  function buildOverviewAoa(DATA) { return sheetToAoa(buildOverview(DATA)); }
 
   /**
    * 讀取匯出格式（或原檔紅框四表）XLSX，回傳 { equipment, milestones }
@@ -851,4 +868,17 @@
 
   global.exportLineFourSheets = exportFourSheets;
   global.importLineFourSheets = importFourSheets;
+  global.LineXlsxCodec = {
+    TRACK: TRACK,
+    WEEKLY: WEEKLY,
+    OUTLOOK: OUTLOOK,
+    OVERVIEW: OVERVIEW,
+    sheetToAoa: sheetToAoa,
+    buildTrackAoa: buildTrackAoa,
+    buildWeeklyAoa: buildWeeklyAoa,
+    buildOutlookAoa: buildOutlookAoa,
+    buildOverviewAoa: buildOverviewAoa,
+    parseTrackFromAoa: parseTrackFromAoa,
+    parseMilestonesFromAoa: parseMilestonesFromAoa
+  };
 })(window);

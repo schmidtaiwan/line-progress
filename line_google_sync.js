@@ -1,10 +1,11 @@
-/* Google Identity + Drive API → JSON sync
- * 使用 drive 範圍（私人用），可用檔名搜尋，手機／電腦才能對到同一份檔。
+/* Google Identity + Drive／Sheets API → 進度同步
+ * storageMode=sheets：一專案一本試算表為 SoT；照片／history 仍用 Drive。
+ * drive 範圍（私人用）+ spreadsheets；可用檔名搜尋，手機／電腦對同一份。
  */
 (function (global) {
   const cfg = global.GOOGLE_CONFIG || {};
   // drive.file 在部分手機瀏覽器／舊 token 容易 SCOPE 不足；私人用改 drive
-  const SCOPES = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email";
+  const SCOPES = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email";
   const state = {
     account: null,
     token: "",
@@ -12,6 +13,7 @@
     lastCloudAt: "",
     busy: false,
     fileId: "",
+    spreadsheetId: "",
     viewers: 0,
     viewerList: []
   };
@@ -29,8 +31,14 @@
   /** 切換專案加速：記住各專案資料夾／檔案 ID，避免每次重查 Drive */
   const folderIdByProject = Object.create(null);
   const fileIdByProject = Object.create(null);
+  const spreadsheetIdByProject = Object.create(null);
+  let cachedIndexSpreadsheetId = "";
   const childFolderListCache = Object.create(null);
   const CHILD_LIST_TTL_MS = 60000;
+
+  function isSheetsMode() {
+    return String(cfg.storageMode || "sheets").toLowerCase() !== "json";
+  }
 
   function projCacheKey(proj) {
     if (!proj) return "";
@@ -88,15 +96,17 @@
     state.fileId = "";
   }
 
-  /** 清除目前專案的 folder／file 快取（誤連到別案檔時強制重解析） */
+  /** 清除目前專案的 folder／file／試算表 快取（誤連到別案檔時強制重解析） */
   function clearActiveFileCache() {
     const key = projCacheKey(activeProject);
     if (key) {
       delete folderIdByProject[key];
       delete fileIdByProject[key];
+      delete spreadsheetIdByProject[key];
     }
     cachedFolderId = "";
     state.fileId = "";
+    state.spreadsheetId = "";
     try { saveStoredFileId(""); } catch (e) {}
   }
 
@@ -104,7 +114,10 @@
     clearFolderCache();
     Object.keys(folderIdByProject).forEach(function (k) { delete folderIdByProject[k]; });
     Object.keys(fileIdByProject).forEach(function (k) { delete fileIdByProject[k]; });
+    Object.keys(spreadsheetIdByProject).forEach(function (k) { delete spreadsheetIdByProject[k]; });
     Object.keys(childFolderListCache).forEach(function (k) { delete childFolderListCache[k]; });
+    cachedIndexSpreadsheetId = "";
+    state.spreadsheetId = "";
     try { saveStoredFileId(""); } catch (e) {}
   }
 
@@ -132,12 +145,17 @@
       folderPath: String(proj.folderPath || (projectsRootParts().concat([sanitizeProjectFolderName(proj.name)]).join("/"))),
       legacyFallback: !!proj.legacyFallback,
       legacyFolderPath: proj.legacyFolderPath || "",
-      legacyFileName: proj.legacyFileName || ""
+      legacyFileName: proj.legacyFileName || "",
+      spreadsheetId: String(proj.spreadsheetId || "").trim(),
+      folderId: String(proj.folderId || "").trim(),
+      arch: proj.arch || "unified"
     };
     const key = projCacheKey(activeProject);
     // 切換時沿用記憶體快取，不要清掉 localStorage 的 fileId（否則每次都重搜 2～3 秒）
-    cachedFolderId = (key && folderIdByProject[key]) || "";
+    cachedFolderId = (key && folderIdByProject[key]) || activeProject.folderId || "";
     state.fileId = (key && fileIdByProject[key]) || "";
+    state.spreadsheetId = (key && spreadsheetIdByProject[key]) || activeProject.spreadsheetId || "";
+    if (state.spreadsheetId && key) spreadsheetIdByProject[key] = state.spreadsheetId;
     if (!state.fileId) loadStoredFileId();
     if (state.fileId && key) fileIdByProject[key] = state.fileId;
     return activeProject;
@@ -177,8 +195,404 @@
       legacyFallback: !!(p && p.legacyFallback),
       legacyFolderPath: (p && p.legacyFolderPath) || "",
       legacyFileName: (p && p.legacyFileName) || "",
-      createdAt: (p && p.createdAt) || ""
+      createdAt: (p && p.createdAt) || "",
+      spreadsheetId: String((p && p.spreadsheetId) || "").trim(),
+      folderId: String((p && p.folderId) || "").trim()
     };
+  }
+
+  function indexSpreadsheetName() {
+    return String(cfg.indexSpreadsheetName || "架線進度_專案索引").trim() || "架線進度_專案索引";
+  }
+
+  function indexSheetName() {
+    return String(cfg.indexSheetName || "projects").trim() || "projects";
+  }
+
+  function projectSpreadsheetTitle(proj) {
+    const n = sanitizeProjectFolderName((proj && proj.name) || "專案");
+    return n + "_架線進度";
+  }
+
+  function rememberSpreadsheetId(id) {
+    state.spreadsheetId = id || "";
+    const key = projCacheKey(activeProject);
+    if (key) {
+      if (id) spreadsheetIdByProject[key] = id;
+      else delete spreadsheetIdByProject[key];
+    }
+    if (activeProject) activeProject.spreadsheetId = id || "";
+  }
+
+  function sheetsFetch(url, options) {
+    options = options || {};
+    const headers = Object.assign({}, options.headers || {}, {
+      Authorization: "Bearer " + state.token
+    });
+    return fetch(url, Object.assign({}, options, { headers: headers }));
+  }
+
+  function quoteSheetRange(sheetName, a1) {
+    const safe = String(sheetName || "").replace(/'/g, "''");
+    return "'" + safe + "'!" + (a1 || "A1");
+  }
+
+  function sheetsGetValues(spreadsheetId, sheetName) {
+    const range = encodeURIComponent(quoteSheetRange(sheetName, "A1:ZZ2000"));
+    return sheetsFetch(
+      "https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(spreadsheetId) +
+      "/values/" + range
+    ).then(function (res) {
+      if (res.status === 404) return [];
+      if (!res.ok) {
+        return res.text().then(function (t) {
+          throw new Error("讀取試算表失敗 " + res.status + " " + t);
+        });
+      }
+      return res.json().then(function (data) { return data.values || []; });
+    });
+  }
+
+  function sheetsBatchUpdateValues(spreadsheetId, aoaByName) {
+    const data = [];
+    Object.keys(aoaByName || {}).forEach(function (name) {
+      const values = aoaByName[name] || [];
+      data.push({
+        range: quoteSheetRange(name, "A1"),
+        majorDimension: "ROWS",
+        values: values
+      });
+    });
+    if (!data.length) return Promise.resolve({});
+    // 先清再寫，避免殘留舊列
+    const clearData = data.map(function (d) {
+      return { range: d.range.replace(/!A1$/, "!A1:ZZ2000") };
+    });
+    return sheetsFetch(
+      "https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(spreadsheetId) +
+      "/values:batchClear",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ranges: clearData.map(function (c) { return c.range; }) })
+      }
+    ).then(function (res) {
+      if (!res.ok && res.status !== 400) {
+        return res.text().then(function (t) {
+          throw new Error("清除試算表失敗 " + res.status + " " + t);
+        });
+      }
+      return sheetsFetch(
+        "https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(spreadsheetId) +
+        "/values:batchUpdate",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ valueInputOption: "RAW", data: data })
+        }
+      );
+    }).then(function (res) {
+      if (!res.ok) {
+        return res.text().then(function (t) {
+          throw new Error("寫入試算表失敗 " + res.status + " " + t);
+        });
+      }
+      return res.json().catch(function () { return {}; });
+    });
+  }
+
+  function ensureSheetTabs(spreadsheetId, wantedNames) {
+    return sheetsFetch(
+      "https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(spreadsheetId) +
+      "?fields=sheets.properties"
+    ).then(function (res) {
+      if (!res.ok) {
+        return res.text().then(function (t) {
+          throw new Error("讀取試算表分頁失敗 " + res.status + " " + t);
+        });
+      }
+      return res.json();
+    }).then(function (meta) {
+      const existing = {};
+      ((meta && meta.sheets) || []).forEach(function (s) {
+        const n = s.properties && s.properties.title;
+        if (n) existing[n] = s.properties.sheetId;
+      });
+      const requests = [];
+      const wanted = wantedNames || [];
+      // 若只有預設 Sheet1／工作表1，先改名成第一個需要的分頁
+      const defaultNames = Object.keys(existing).filter(function (n) {
+        return /^工作表\d+$/i.test(n) || /^Sheet\d+$/i.test(n);
+      });
+      if (wanted.length && defaultNames.length && !existing[wanted[0]]) {
+        const dn = defaultNames[0];
+        requests.push({
+          updateSheetProperties: {
+            properties: { sheetId: existing[dn], title: wanted[0] },
+            fields: "title"
+          }
+        });
+        existing[wanted[0]] = existing[dn];
+        delete existing[dn];
+      }
+      wanted.forEach(function (name) {
+        if (!existing[name]) {
+          requests.push({ addSheet: { properties: { title: name } } });
+        }
+      });
+      if (!requests.length) return spreadsheetId;
+      return sheetsFetch(
+        "https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(spreadsheetId) +
+        ":batchUpdate",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ requests: requests })
+        }
+      ).then(function (res) {
+        if (!res.ok) {
+          return res.text().then(function (t) {
+            throw new Error("建立工作表分頁失敗 " + res.status + " " + t);
+          });
+        }
+        return spreadsheetId;
+      });
+    });
+  }
+
+  function findSpreadsheetInFolder(folderId, title) {
+    const safe = String(title || "").replace(/'/g, "\\'");
+    let q = "mimeType='application/vnd.google-apps.spreadsheet' and name='" + safe + "' and trashed=false";
+    if (folderId && folderId !== "root") q += " and '" + folderId + "' in parents";
+    return driveListByQuery(q).then(function (files) {
+      return (files[0] && files[0].id) || "";
+    });
+  }
+
+  function createSpreadsheetInFolder(folderId, title) {
+    const meta = {
+      name: title,
+      mimeType: "application/vnd.google-apps.spreadsheet"
+    };
+    if (folderId) meta.parents = [folderId];
+    return driveFetch("https://www.googleapis.com/drive/v3/files?fields=id,name&supportsAllDrives=true", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(meta)
+    }).then(function (res) {
+      if (!res.ok) {
+        return res.text().then(function (t) {
+          throw new Error("建立試算表失敗 " + res.status + " " + t);
+        });
+      }
+      return res.json();
+    }).then(function (f) { return f.id; });
+  }
+
+  function ensureIndexSpreadsheetId() {
+    if (cachedIndexSpreadsheetId) return Promise.resolve(cachedIndexSpreadsheetId);
+    if (cfg.indexSpreadsheetId) {
+      cachedIndexSpreadsheetId = String(cfg.indexSpreadsheetId).trim();
+      return Promise.resolve(cachedIndexSpreadsheetId);
+    }
+    return ensureProjectsRootId().then(function (rootId) {
+      return findSpreadsheetInFolder(rootId, indexSpreadsheetName()).then(function (id) {
+        if (id) {
+          cachedIndexSpreadsheetId = id;
+          return id;
+        }
+        return createSpreadsheetInFolder(rootId, indexSpreadsheetName()).then(function (nid) {
+          cachedIndexSpreadsheetId = nid;
+          return ensureSheetTabs(nid, [indexSheetName()]).then(function () { return nid; });
+        });
+      });
+    });
+  }
+
+  function readIndexFromSheets() {
+    return ensureIndexSpreadsheetId().then(function (sid) {
+      return ensureSheetTabs(sid, [indexSheetName()]).then(function () {
+        return sheetsGetValues(sid, indexSheetName()).then(function (aoa) {
+          const codec = global.LineSheetsCodec;
+          if (!codec) return { projects: [], forceBuildId: "", spreadsheetId: sid };
+          const parsed = codec.indexAoaToProjects(aoa);
+          return {
+            projects: (parsed.projects || []).map(normalizeProjectRecord),
+            forceBuildId: parsed.forceBuildId || "",
+            spreadsheetId: sid
+          };
+        });
+      });
+    });
+  }
+
+  function writeIndexToSheets(projects) {
+    const list = Array.isArray(projects) ? projects.map(normalizeProjectRecord) : [];
+    const buildId = String(cfg.forceIndexBuildId || "").trim();
+    const codec = global.LineSheetsCodec;
+    if (!codec) return Promise.reject(new Error("缺少 LineSheetsCodec"));
+    return ensureIndexSpreadsheetId().then(function (sid) {
+      return ensureSheetTabs(sid, [indexSheetName()]).then(function () {
+        const aoa = codec.projectsToIndexAoa(list, buildId);
+        const map = {};
+        map[indexSheetName()] = aoa;
+        return sheetsBatchUpdateValues(sid, map).then(function () { return list; });
+      });
+    });
+  }
+
+  function projectSheetTabNames() {
+    const codec = global.LineSheetsCodec;
+    const n = (codec && codec.sheetNames()) || {};
+    return [n.meta, n.track, n.weekly, n.outlook, n.overview, n.photos].filter(Boolean);
+  }
+
+  function ensureProjectSpreadsheetId(proj) {
+    const p = proj || activeProject;
+    if (!p) return Promise.reject(new Error("尚未選擇專案"));
+    const key = projCacheKey(p);
+    const known = (p.spreadsheetId || (key && spreadsheetIdByProject[key]) || state.spreadsheetId || "").trim();
+    const title = projectSpreadsheetTitle(p);
+
+    function afterId(id) {
+      rememberSpreadsheetId(id);
+      if (p) p.spreadsheetId = id;
+      return ensureSheetTabs(id, projectSheetTabNames()).then(function () { return id; });
+    }
+
+    return ensureFolderId().then(function (folderId) {
+      if (p) p.folderId = folderId;
+      if (known) {
+        return sheetsFetch(
+          "https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(known) +
+          "?fields=spreadsheetId"
+        ).then(function (res) {
+          if (res.ok) return afterId(known);
+          return findSpreadsheetInFolder(folderId, title).then(function (id) {
+            if (id) return afterId(id);
+            return createSpreadsheetInFolder(folderId, title).then(afterId);
+          });
+        }).catch(function () {
+          return findSpreadsheetInFolder(folderId, title).then(function (id) {
+            if (id) return afterId(id);
+            return createSpreadsheetInFolder(folderId, title).then(afterId);
+          });
+        });
+      }
+      return findSpreadsheetInFolder(folderId, title).then(function (id) {
+        if (id) return afterId(id);
+        return createSpreadsheetInFolder(folderId, title).then(afterId);
+      });
+    });
+  }
+
+  function readPayloadFromSheets(spreadsheetId) {
+    const codec = global.LineSheetsCodec;
+    if (!codec) return Promise.reject(new Error("缺少 LineSheetsCodec"));
+    const names = codec.sheetNames();
+    const tabs = projectSheetTabNames();
+    return ensureSheetTabs(spreadsheetId, tabs).then(function () {
+      const aoaByName = {};
+      let chain = Promise.resolve();
+      tabs.forEach(function (name) {
+        chain = chain.then(function () {
+          return sheetsGetValues(spreadsheetId, name).then(function (aoa) {
+            aoaByName[name] = aoa;
+          });
+        });
+      });
+      return chain.then(function () {
+        const metaAoa = aoaByName[names.meta] || [];
+        const hasMeta = metaAoa.length > 1;
+        if (!hasMeta) return null;
+        return codec.sheetAoaMapToPayload(aoaByName, {});
+      });
+    });
+  }
+
+  function writePayloadToSheets(spreadsheetId, payload) {
+    const codec = global.LineSheetsCodec;
+    if (!codec) return Promise.reject(new Error("缺少 LineSheetsCodec"));
+    // 人讀表需要 XLSX codec
+    if (!global.LineXlsxCodec) {
+      console.warn("LineXlsxCodec 未載入，僅寫入 _meta／_photos");
+    }
+    const aoaMap = codec.payloadToSheetAoaMap(payload);
+    return ensureSheetTabs(spreadsheetId, Object.keys(aoaMap)).then(function () {
+      return sheetsBatchUpdateValues(spreadsheetId, aoaMap);
+    });
+  }
+
+  function downloadJsonLegacy() {
+    const key = projCacheKey(activeProject);
+    const cachedId = state.fileId || (key && fileIdByProject[key]) || "";
+    const tryCached = cachedId
+      ? fetchJsonIfInActiveFolder(cachedId).then(function (data) {
+          if (data) {
+            saveStoredFileId(cachedId);
+            return data;
+          }
+          return null;
+        }).catch(function () { return null; })
+      : Promise.resolve(null);
+    return tryCached.then(function (cachedData) {
+      if (cachedData) return cachedData;
+      return findFilesInFolder().then(function (inFolder) {
+        return downloadFirstNonEmpty(inFolder).then(function (data) {
+          if (data) return data;
+          if (isSharedProjectsRoot()) return null;
+          return findLegacyData();
+        });
+      });
+    });
+  }
+
+  function uploadJsonLegacy(payload) {
+    const body = JSON.stringify(payload);
+    return ensureFileId().then(function (id) {
+      return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + id + "?uploadType=media", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: body
+      }).then(function (res) {
+        if (res.status === 404) {
+          saveStoredFileId("");
+          return createFile().then(function (nid) {
+            return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + nid + "?uploadType=media", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json; charset=utf-8" },
+              body: body
+            });
+          });
+        }
+        return res;
+      }).then(function (res) {
+        if (!res.ok) return res.text().then(function (t) { throw new Error("上傳失敗 " + res.status + " " + t); });
+        return res.json().catch(function () { return {}; });
+      });
+    });
+  }
+
+  function persistSpreadsheetIdToIndex(proj) {
+    if (!proj || !proj.spreadsheetId) return Promise.resolve();
+    return readIndexFromSheets().then(function (idx) {
+      let list = idx.projects || [];
+      let found = false;
+      list = list.map(function (p) {
+        if (p.id === proj.id || normFolderKey(p.name) === normFolderKey(proj.name)) {
+          found = true;
+          return normalizeProjectRecord(Object.assign({}, p, {
+            spreadsheetId: proj.spreadsheetId,
+            folderId: proj.folderId || p.folderId
+          }));
+        }
+        return p;
+      });
+      if (!found) list.push(normalizeProjectRecord(proj));
+      return writeIndexToSheets(list);
+    }).catch(function (e) {
+      console.warn("索引寫回 spreadsheetId 失敗", e);
+    });
   }
 
   /** 專案資料夾相對共用根／projectsRoot 的路徑片段（通常只有專案名稱） */
@@ -496,7 +910,7 @@
     });
   }
 
-  /** 只讀 projects_index，不依資料夾重建（刪案用，避免刪前又把資料夾同步回來） */
+  /** 只讀專案清單，不依資料夾重建（刪案用） */
   function readProjectsIndexRaw() {
     return ensureInit()
       .then(function () {
@@ -505,6 +919,15 @@
       .then(function () {
         return withScopeRetry(function () {
           return ensureProjectsRootId().then(function (rootId) {
+            if (isSheetsMode()) {
+              return readIndexFromSheets().then(function (idx) {
+                return {
+                  rootId: rootId,
+                  data: { forceBuildId: idx.forceBuildId, projects: idx.projects },
+                  list: idx.projects || []
+                };
+              });
+            }
             return fetchJsonInFolder(rootId, "projects_index.json").then(function (data) {
               const list = (data && Array.isArray(data.projects))
                 ? data.projects.map(normalizeProjectRecord)
@@ -516,6 +939,36 @@
       });
   }
 
+  function migrateIndexJsonToSheets(rootId, buildId) {
+    return fetchJsonInFolder(rootId, "projects_index.json").then(function (data) {
+      let list = (data && Array.isArray(data.projects))
+        ? data.projects.map(normalizeProjectRecord).filter(function (p) { return p && p.name; })
+        : [];
+      if (list.length) return writeIndexToSheets(list).then(function () { return list; });
+
+      const forced = forceIndexHints();
+      return syncProjectsIndexFromDrive(rootId, forced, {
+        forceBuildId: buildId,
+        seedMissing: false
+      }).then(function (fromFolders) {
+        if (fromFolders && fromFolders.length) {
+          return writeIndexToSheets(fromFolders).then(function () { return fromFolders; });
+        }
+        return migrateIntoSharedRootIfNeeded(rootId, forced).then(function (migrated) {
+          return syncProjectsIndexFromDrive(rootId, migrated || forced, {
+            forceBuildId: buildId,
+            seedMissing: false
+          }).then(function (again) {
+            const fallback = (again && again.length)
+              ? again
+              : defaultProjectsList().map(normalizeProjectRecord);
+            return writeIndexToSheets(fallback).then(function () { return fallback; });
+          });
+        });
+      });
+    });
+  }
+
   function loadProjectsIndex() {
     return ensureInit()
       .then(function () {
@@ -524,15 +977,27 @@
       .then(function () {
         return withScopeRetry(function () {
           return ensureProjectsRootId().then(function (rootId) {
+            const buildId = String(cfg.forceIndexBuildId || "").trim();
+
+            if (isSheetsMode()) {
+              return readIndexFromSheets().then(function (idx) {
+                let list = (idx.projects || []).filter(function (p) { return p && p.name; });
+                if (list.length) {
+                  if (buildId && idx.forceBuildId !== buildId) {
+                    return writeIndexToSheets(list).then(function () { return list; });
+                  }
+                  return list;
+                }
+                return migrateIndexJsonToSheets(rootId, buildId);
+              });
+            }
+
             return fetchJsonInFolder(rootId, "projects_index.json").then(function (data) {
-              const buildId = String(cfg.forceIndexBuildId || "").trim();
               let list = (data && Array.isArray(data.projects))
                 ? data.projects.map(normalizeProjectRecord).filter(function (p) { return p && p.name; })
                 : [];
               const hasIndex = list.length > 0;
 
-              // ★ 有清單就以 projects_index 為準，不再每次用資料夾重建
-              // （否則刪案後資料夾若還在／刪不掉，重整一定又變回來）
               if (hasIndex) {
                 if (buildId && data.forceBuildId !== buildId) {
                   return putJsonInFolder(rootId, "projects_index.json", {
@@ -544,7 +1009,6 @@
                 return list;
               }
 
-              // 空清單：才從資料夾／遷移建立
               const forced = forceIndexHints();
               return syncProjectsIndexFromDrive(rootId, forced, {
                 forceBuildId: buildId,
@@ -581,12 +1045,14 @@
       })
       .then(function () {
         return withScopeRetry(function () {
+          if (isSheetsMode()) {
+            return writeIndexToSheets(list);
+          }
           return ensureProjectsRootId().then(function (rootId) {
             const payload = {
               savedAt: new Date().toISOString(),
               projects: list
             };
-            // 必須帶上 forceBuildId，否則下次載入會再跑強制清單把已刪專案加回
             if (buildId) payload.forceBuildId = buildId;
             return putJsonInFolder(rootId, "projects_index.json", payload).then(function () { return list; });
           });
@@ -1522,7 +1988,7 @@
   }
 
   function isScopeError(text) {
-    return /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions|insufficient authentication scopes|insufficientFilePermissions|寫入專案清單失敗 403|建立專案清單失敗 403|建立資料夾失敗 403/i.test(text || "");
+    return /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions|insufficient authentication scopes|insufficientFilePermissions|寫入專案清單失敗 403|建立專案清單失敗 403|建立資料夾失敗 403|建立試算表失敗 403|讀取試算表失敗 403|寫入試算表失敗 403|Google Sheets API has not been used|ACCESS_TOKEN_SCOPE/i.test(text || "");
   }
 
   function withScopeRetry(fn) {
@@ -1573,25 +2039,27 @@
       })
       .then(function () {
         return withScopeRetry(function () {
-          const key = projCacheKey(activeProject);
-          const cachedId = state.fileId || (key && fileIdByProject[key]) || "";
-          const tryCached = cachedId
-            ? fetchJsonIfInActiveFolder(cachedId).then(function (data) {
-                if (data) {
-                  saveStoredFileId(cachedId);
-                  return data;
+          if (!isSheetsMode()) return downloadJsonLegacy();
+
+          return ensureProjectSpreadsheetId(activeProject).then(function (sid) {
+            return readPayloadFromSheets(sid).then(function (fromSheets) {
+              if (fromSheets) {
+                state.lastCloudAt = fromSheets.savedAt || new Date().toISOString();
+                return fromSheets;
+              }
+              // 一次性：從舊 line_data.json 遷移到試算表
+              return downloadJsonLegacy().then(function (legacy) {
+                if (!legacy) {
+                  if (isSharedProjectsRoot()) return null;
+                  return findLegacyData();
                 }
-                return null;
-              }).catch(function () { return null; })
-            : Promise.resolve(null);
-          return tryCached.then(function (cachedData) {
-            if (cachedData) return cachedData;
-            return findFilesInFolder().then(function (inFolder) {
-              return downloadFirstNonEmpty(inFolder).then(function (data) {
-                if (data) return data;
-                // 共用根模式略過舊路徑搜尋（省一次往返）
-                if (isSharedProjectsRoot()) return null;
-                return findLegacyData();
+                return writePayloadToSheets(sid, legacy).then(function () {
+                  rememberSpreadsheetId(sid);
+                  return persistSpreadsheetIdToIndex(activeProject).then(function () {
+                    state.lastCloudAt = new Date().toISOString();
+                    return legacy;
+                  });
+                });
               });
             });
           });
@@ -1602,39 +2070,57 @@
 
   function uploadJson(payload) {
     state.busy = true;
-    const body = JSON.stringify(payload);
     return ensureInit()
       .then(function () {
         if (!state.account) return login();
       })
       .then(function () {
         return withScopeRetry(function () {
-          return ensureFileId().then(function (id) {
-            return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + id + "?uploadType=media", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json; charset=utf-8" },
-              body: body
-            }).then(function (res) {
-              if (res.status === 404) {
-                saveStoredFileId("");
-                return createFile().then(function (nid) {
-                  return driveFetch("https://www.googleapis.com/upload/drive/v3/files/" + nid + "?uploadType=media", {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json; charset=utf-8" },
-                    body: body
-                  });
-                });
-              }
-              return res;
-            }).then(function (res) {
-              if (!res.ok) return res.text().then(function (t) { throw new Error("上傳失敗 " + res.status + " " + t); });
+          if (!isSheetsMode()) {
+            return uploadJsonLegacy(payload).then(function (r) {
               state.lastCloudAt = new Date().toISOString();
-              return res.json().catch(function () { return {}; });
+              return r;
+            });
+          }
+          return ensureProjectSpreadsheetId(activeProject).then(function (sid) {
+            return writePayloadToSheets(sid, payload).then(function () {
+              rememberSpreadsheetId(sid);
+              state.lastCloudAt = new Date().toISOString();
+              const backup = cfg.writeJsonBackup !== false
+                ? uploadJsonLegacy(payload).catch(function (e) {
+                    console.warn("JSON 備份寫入失敗", e);
+                  })
+                : Promise.resolve();
+              return persistSpreadsheetIdToIndex(activeProject).then(function () {
+                return backup.then(function () { return { spreadsheetId: sid }; });
+              });
             });
           });
         });
       })
       .finally(function () { state.busy = false; });
+  }
+
+  function getSpreadsheetId() {
+    const key = projCacheKey(activeProject);
+    return (
+      state.spreadsheetId ||
+      (activeProject && activeProject.spreadsheetId) ||
+      (key && spreadsheetIdByProject[key]) ||
+      ""
+    );
+  }
+
+  function spreadsheetEditUrl(id) {
+    const sid = id || getSpreadsheetId();
+    if (!sid) return "";
+    return "https://docs.google.com/spreadsheets/d/" + encodeURIComponent(sid) + "/edit";
+  }
+
+  function spreadsheetEmbedUrl(id) {
+    const sid = id || getSpreadsheetId();
+    if (!sid) return "";
+    return "https://docs.google.com/spreadsheets/d/" + encodeURIComponent(sid) + "/edit?usp=sharing&rm=minimal";
   }
 
   function scheduleUpload(payload, delayMs) {
@@ -1770,7 +2256,8 @@
           : "";
       const rootLabel = (cfg.projectsRoot || "共用資料夾").trim() || "共用資料夾";
       const share = isSharedProjectsRoot() ? ("　｜　儲存於「" + rootLabel + "」") : "";
-      return "Google 雲端　｜　已登入 " + who + share + view +
+      const mode = isSheetsMode() ? "　｜　Sheets 儲存" : "";
+      return "Google 雲端　｜　已登入 " + who + share + mode + view +
         (state.lastCloudAt ? "　｜　上次雲端 " + state.lastCloudAt.replace("T", " ").slice(0, 19) : "");
     }
     return "Google 雲端　｜　未登入（登入後才載入資料）";
@@ -1911,6 +2398,7 @@
     logout: logout,
     accountEmail: accountEmail,
     isSharedProjectsRoot: isSharedProjectsRoot,
+    isSheetsMode: isSheetsMode,
     downloadJson: downloadJson,
     findLegacyData: findLegacyData,
     clearActiveFileCache: clearActiveFileCache,
@@ -1937,7 +2425,19 @@
     deleteProject: deleteProject,
     duplicateProject: duplicateProject,
     uniqueProjectName: uniqueProjectName,
-    sanitizeProjectFolderName: sanitizeProjectFolderName
+    sanitizeProjectFolderName: sanitizeProjectFolderName,
+    getSpreadsheetId: getSpreadsheetId,
+    spreadsheetEditUrl: spreadsheetEditUrl,
+    spreadsheetEmbedUrl: spreadsheetEmbedUrl,
+    ensureProjectSpreadsheetId: function () {
+      return ensureInit().then(function () {
+        if (!state.account) return login();
+      }).then(function () {
+        return withScopeRetry(function () {
+          return ensureProjectSpreadsheetId(activeProject);
+        });
+      });
+    }
   };
 
   global.LineGoogle = api;

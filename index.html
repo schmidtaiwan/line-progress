@@ -1450,6 +1450,21 @@
   .project-rail .btn-add-proj.danger-rail:hover { background: #ffe4e6; }
   .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   body.locked .project-rail { display: none; }
+  .sheets-embed-wrap {
+    display: flex; flex-direction: column; gap: 10px; min-height: 70vh;
+  }
+  .sheets-embed-toolbar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    font-size: 13px; color: var(--muted);
+  }
+  .sheets-embed-toolbar a {
+    color: #1d4f91; font-weight: 600; text-decoration: none;
+  }
+  .sheets-embed-toolbar a:hover { text-decoration: underline; }
+  .sheets-embed-frame {
+    width: 100%; flex: 1; min-height: 68vh; border: 1px solid var(--line);
+    border-radius: 12px; background: #fff;
+  }
 </style>
 </head>
 <body>
@@ -1499,6 +1514,7 @@
     <button data-tab="overview"><span class="tab-full">總覽</span><span class="tab-short">總覽</span></button>
     <button data-tab="items"><span class="tab-full">清單</span><span class="tab-short">清單</span></button>
     <button data-tab="map"><span class="tab-full">總圖</span><span class="tab-short">總圖</span></button>
+    <button data-tab="sheets"><span class="tab-full">試算表</span><span class="tab-short">Sheets</span></button>
     <button data-tab="settings"><span class="tab-full">⚙ 設定</span><span class="tab-short">⚙設定</span></button>
   </nav>
 </header>
@@ -1508,6 +1524,7 @@
   <section id="overview" class="hidden"></section>
   <section id="items" class="hidden"></section>
   <section id="map" class="hidden"></section>
+  <section id="sheets" class="hidden"></section>
   <section id="settings" class="hidden"></section>
   <p class="foot" id="foot"></p>
 </main>
@@ -1575,11 +1592,12 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=69"></script>
-<script src="line_google_sync.js?v=69"></script>
+<script src="google_config.js?v=70"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
-<script src="export_line_xlsx.js?v=36"></script>
+<script src="export_line_xlsx.js?v=70"></script>
+<script src="line_sheets_codec.js?v=70"></script>
+<script src="line_google_sync.js?v=70"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 let STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1601,7 +1619,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 69;
+const PAGE_BUILD = 70;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -5043,14 +5061,15 @@ function render() {
     } else {
       btn.style.opacity = "";
       if (btn.dataset.tab !== "settings") btn.title = "";
+      if (btn.dataset.tab === "sheets") btn.title = "嵌入本專案 Google 試算表（進度雲端來源）";
     }
   });
-  ["weekly", "overview", "items", "map", "settings"].forEach(id => {
+  ["weekly", "overview", "items", "map", "sheets", "settings"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.toggle("hidden", id !== state.tab);
   });
-  document.querySelector("main").classList.toggle("map-wide", state.tab === "map");
-  const showKpi = state.tab !== "map" && state.tab !== "settings";
+  document.querySelector("main").classList.toggle("map-wide", state.tab === "map" || state.tab === "sheets");
+  const showKpi = state.tab !== "map" && state.tab !== "settings" && state.tab !== "sheets";
   document.getElementById("kpis").classList.toggle("hidden", !showKpi);
   if (showKpi) renderKpis();
   if (state.tab === "weekly") renderWeekly();
@@ -5072,7 +5091,43 @@ function render() {
         `${cloudBarHtml()}<p class="note">節點時程總覽（Start～Finish）。新增設備後可改用設備總圖。</p>${buildHierarchyProgressBlock({ editable: false })}`;
     }
   }
+  if (state.tab === "sheets") renderSheetsEmbed();
   if (state.tab === "settings") renderSettings();
+}
+
+function renderSheetsEmbed() {
+  const host = document.getElementById("sheets");
+  if (!host) return;
+  if (isProjectsOverview()) {
+    host.innerHTML = `${cloudBarHtml()}<p class="note">請先選左側專案，再開啟該案試算表。</p>`;
+    return;
+  }
+  if (!isCloudLoggedIn() || !window.LineOneDrive) {
+    host.innerHTML = `${cloudBarHtml()}<p class="note">請先登入 Google，才能顯示雲端試算表。</p>`;
+    return;
+  }
+  const editUrl = (typeof LineOneDrive.spreadsheetEditUrl === "function" && LineOneDrive.spreadsheetEditUrl()) || "";
+  const embedUrl = (typeof LineOneDrive.spreadsheetEmbedUrl === "function" && LineOneDrive.spreadsheetEmbedUrl()) || "";
+  const sid = (typeof LineOneDrive.getSpreadsheetId === "function" && LineOneDrive.getSpreadsheetId()) || "";
+  if (embedUrl && sid) {
+    host.innerHTML = `${cloudBarHtml()}
+      <div class="sheets-embed-wrap">
+        <div class="sheets-embed-toolbar">
+          <span>雲端進度來源＝此試算表（與網頁 UI 同一本）</span>
+          <a href="${escapeAttr(editUrl)}" target="_blank" rel="noopener">在新分頁開啟</a>
+          <button type="button" class="btn-cloud" data-sheets-reload>重新載入嵌入</button>
+          <button type="button" class="btn-cloud" data-sheets-ensure>確認／建立試算表</button>
+        </div>
+        <p class="note">需已登入 Google 且對共用資料夾有權限。若內嵌空白，請用「在新分頁開啟」。在 Sheets 改清單後，請回網頁按雲端重新載入。</p>
+        <iframe class="sheets-embed-frame" title="專案試算表" src="${escapeAttr(embedUrl)}"></iframe>
+      </div>`;
+    return;
+  }
+  host.innerHTML = `${cloudBarHtml()}
+    <div class="sheets-embed-wrap">
+      <p class="note">尚未取得試算表 ID。首次儲存或按下方按鈕會建立「專案名_架線進度」。</p>
+      <button type="button" class="btn-cloud" data-sheets-ensure>建立／載入試算表</button>
+    </div>`;
 }
 
 function renderSettings() {
@@ -6798,6 +6853,31 @@ document.body.addEventListener("click", ev => {
   if (ev.target.closest("[data-sync-later]")) { hideSyncConflict(); return; }
   if (ev.target.closest("[data-cloud-login]")) { cloudLogin(); return; }
   if (ev.target.closest("[data-cloud-pull]")) { cloudPull(); return; }
+  if (ev.target.closest("[data-sheets-reload]")) {
+    renderSheetsEmbed();
+    return;
+  }
+  if (ev.target.closest("[data-sheets-ensure]")) {
+    (async () => {
+      try {
+        if (!window.LineOneDrive || typeof LineOneDrive.ensureProjectSpreadsheetId !== "function") {
+          toast("同步元件未就緒");
+          return;
+        }
+        toast("確認試算表中…");
+        await LineOneDrive.ensureProjectSpreadsheetId();
+        // 若尚無內容，把目前 DATA 寫入一次
+        if (typeof LineOneDrive.uploadJson === "function" && typeof cloudPayload === "function") {
+          await LineOneDrive.uploadJson(cloudPayload());
+        }
+        toast("試算表已就緒");
+        renderSheetsEmbed();
+      } catch (e) {
+        toast("試算表失敗：" + ((e && e.message) || e));
+      }
+    })();
+    return;
+  }
   if (ev.target.closest("[data-cloud-push]")) { cloudPush(); return; }
   if (ev.target.closest("[data-cloud-logout]")) {
     stopCloudWatch();
