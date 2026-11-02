@@ -772,6 +772,32 @@
   }
   .login-gate .cloud-bar .msg { text-align: left; }
   .login-gate .btn-cloud { width: 100%; padding: 12px 14px; font-size: 16px; }
+  .login-gate .boot-load-status {
+    margin: 8px 0 0;
+    padding: 14px 12px;
+    border-radius: 12px;
+    background: #eef5fb;
+    border: 1px solid #d5e6f5;
+  }
+  .login-gate .boot-load-status .phase {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 0 0 6px;
+  }
+  .login-gate .boot-load-status .timer {
+    font-size: 28px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: #1d6fa5;
+    margin: 0;
+    letter-spacing: 0.02em;
+  }
+  .login-gate .boot-load-status .hint {
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
   body.locked nav.tabs,
   body.locked #kpis,
   body.locked #foot,
@@ -1264,6 +1290,15 @@
     font-size: 13px;
     line-height: 1.35;
   }
+  .project-rail .proj-btn[draggable="true"] { cursor: grab; }
+  .project-rail .proj-btn.dragging {
+    opacity: 0.45;
+    cursor: grabbing;
+  }
+  .project-rail .proj-btn.drag-over {
+    border-color: #1d6fa5;
+    box-shadow: inset 0 0 0 1px #1d6fa5;
+  }
   .project-rail .proj-btn.on {
     background: #16324a;
     color: #fff;
@@ -1421,7 +1456,7 @@
 <div class="app-shell">
 <aside class="project-rail" id="projectRail" aria-label="專案列表">
   <h2 class="rail-title">專案</h2>
-  <p class="rail-hint">點選切換；右鍵可複製／刪除／貼上</p>
+  <p class="rail-hint">點選切換；按住拖曳可排序；右鍵可複製／刪除／貼上</p>
   <div class="proj-list" id="projectList"></div>
   <button type="button" class="btn-add-proj" data-add-project title="新增專案">＋ 新增專案</button>
   <button type="button" class="btn-add-proj" data-copy-project title="複製目前專案到剪貼簿">複製專案</button>
@@ -1540,8 +1575,8 @@
   </div>
 </div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="google_config.js?v=67"></script>
-<script src="line_google_sync.js?v=67"></script>
+<script src="google_config.js?v=69"></script>
+<script src="line_google_sync.js?v=69"></script>
 <script src="xlsx-js-style.min.js?v=36"></script>
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=36"></script>
@@ -1555,7 +1590,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0 };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1566,7 +1601,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 67;
+const PAGE_BUILD = 69;
 const PAGE_DATE = "2026-11-02";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const HIERARCHY_SEED_R02 = {
@@ -2437,18 +2472,44 @@ function renderProjectRail() {
   }
   html += list.map(p => {
     const on = p.id === curId ? "on" : "";
-    return `<button type="button" class="proj-btn ${on}" data-project-id="${escapeAttr(p.id)}" title="${escapeAttr(p.folderPath || p.name)}">${escapeHtml(p.name)}</button>`;
+    return `<button type="button" class="proj-btn ${on}" draggable="true" data-project-id="${escapeAttr(p.id)}" title="${escapeAttr((p.folderPath || p.name) + "（按住拖曳可上下排序）")}">${escapeHtml(p.name)}</button>`;
   }).join("");
   host.innerHTML = html;
+}
+
+async function reorderProjects(fromId, toId) {
+  const list = state.projects || [];
+  const from = list.findIndex(p => p && p.id === fromId);
+  const to = list.findIndex(p => p && p.id === toId);
+  if (from < 0 || to < 0 || from === to) return;
+  const next = list.slice();
+  const item = next.splice(from, 1)[0];
+  next.splice(to, 0, item);
+  state.projects = next;
+  renderProjectRail();
+  if (!isCloudLoggedIn() || !window.LineOneDrive || typeof LineOneDrive.saveProjectsIndex !== "function") {
+    toast("已調整順序（未登入，僅本機）");
+    return;
+  }
+  try {
+    await LineOneDrive.saveProjectsIndex(next);
+    toast("已儲存專案順序");
+  } catch (e) {
+    console.warn(e);
+    toast("順序儲存失敗：" + ((e && e.message) || e));
+  }
 }
 
 async function ensureProjectsLoaded() {
   if (!window.LineOneDrive || !isCloudLoggedIn()) return;
   if (typeof LineOneDrive.loadProjectsIndex !== "function") return;
   if (state.projectsLoading) return;
+  const ownBoot = !state.bootLoading;
+  if (ownBoot) startBootLoadUI("載入資料中…");
   state.cloudAccount = accountScopeKey();
   state.projectsLoading = true;
   state.projectsError = "";
+  updateBootLoadPhase("載入專案清單…");
   renderProjectRail();
   try {
     // 專案清單來自「目前登入帳號」的 Drive：架線進度專案/projects_index.json
@@ -2465,19 +2526,28 @@ async function ensureProjectsLoaded() {
 
     const remembered = readRememberedProjectId();
     if (remembered === PROJECTS_OVERVIEW_ID) {
+      updateBootLoadPhase("載入專案總覽…");
       await activateProjectsOverview({ fromCloud: true, skipConfirm: true });
       return;
     }
     let cur = state.projects.find(p => p.id === remembered) || state.projects[0];
-    if (!cur) return;
+    if (!cur) {
+      updateBootLoadPhase("尚無專案");
+      return;
+    }
+    updateBootLoadPhase("載入專案「" + cur.name + "」…");
     await activateProject(cur, { skipConfirm: true, fromCloud: true });
+    updateBootLoadPhase("載入完成");
   } catch (e) {
     console.warn(e);
     state.projectsError = String((e && e.message) || e || "載入失敗");
     toast("專案清單載入失敗：" + state.projectsError);
+    updateBootLoadPhase("載入失敗");
   } finally {
     state.projectsLoading = false;
+    if (ownBoot) stopBootLoadUI();
     renderProjectRail();
+    if (ownBoot) render();
   }
 }
 
@@ -3329,7 +3399,53 @@ function updateCloudBar() {
     saveBtn.classList.toggle("dirty", !!state.dirty);
   }
 }
-function renderLoginGate() {
+function bootLoadElapsedSec() {
+  if (!state.bootLoadStartedAt) return 0;
+  return Math.max(0, Math.floor((Date.now() - state.bootLoadStartedAt) / 1000));
+}
+
+function formatBootLoadTimer(sec) {
+  const s = Math.max(0, Number(sec) || 0);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0");
+}
+
+function updateBootLoadTimerDom() {
+  const el = document.getElementById("bootLoadTimer");
+  if (el) el.textContent = formatBootLoadTimer(bootLoadElapsedSec());
+  const phase = document.getElementById("bootLoadPhase");
+  if (phase && state.bootLoadPhase) phase.textContent = state.bootLoadPhase;
+}
+
+function startBootLoadUI(phase) {
+  state.bootLoading = true;
+  state.bootLoadPhase = phase || "載入資料中…";
+  if (!state.bootLoadStartedAt) state.bootLoadStartedAt = Date.now();
+  if (state.bootLoadTimer) clearInterval(state.bootLoadTimer);
+  state.bootLoadTimer = setInterval(updateBootLoadTimerDom, 250);
+  renderBootLoadGate();
+}
+
+function updateBootLoadPhase(phase) {
+  if (!phase) return;
+  state.bootLoadPhase = phase;
+  const el = document.getElementById("bootLoadPhase");
+  if (el) el.textContent = phase;
+  else if (state.bootLoading) renderBootLoadGate();
+}
+
+function stopBootLoadUI() {
+  state.bootLoading = false;
+  state.bootLoadPhase = "";
+  state.bootLoadStartedAt = 0;
+  if (state.bootLoadTimer) {
+    clearInterval(state.bootLoadTimer);
+    state.bootLoadTimer = null;
+  }
+}
+
+function prepareLockedShell() {
   document.body.classList.add("locked");
   document.getElementById("title").textContent = "";
   document.getElementById("subtitle").textContent = "";
@@ -3342,6 +3458,32 @@ function renderLoginGate() {
   const settingsGate = document.getElementById("settings");
   if (settingsGate) settingsGate.innerHTML = "";
   document.getElementById("foot").textContent = "";
+  document.getElementById("weekly").classList.remove("hidden");
+  ["overview", "items", "map", "settings"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hidden");
+  });
+}
+
+function renderBootLoadGate() {
+  prepareLockedShell();
+  const phase = escapeHtml(state.bootLoadPhase || "載入資料中…");
+  const t = formatBootLoadTimer(bootLoadElapsedSec());
+  document.getElementById("weekly").innerHTML = `
+    <div class="login-gate">
+      <h2>登入後繼續</h2>
+      <p>已登入 Google，正在載入雲端專案與進度資料。</p>
+      <div class="boot-load-status" role="status" aria-live="polite">
+        <p class="phase" id="bootLoadPhase">${phase}</p>
+        <p class="timer" id="bootLoadTimer">${t}</p>
+        <p class="hint">載入資料中，請稍候…</p>
+      </div>
+      ${cloudBarHtml()}
+    </div>`;
+}
+
+function renderLoginGate() {
+  prepareLockedShell();
   const missing = !window.LineOneDrive;
   document.getElementById("weekly").innerHTML = `
     <div class="login-gate">
@@ -3351,11 +3493,6 @@ function renderLoginGate() {
         : "未登入時不顯示進度資料。<br>請先按下方「登入 Google」；登入後即可載入／編輯雲端資料。"}</p>
       ${cloudBarHtml()}
     </div>`;
-  document.getElementById("weekly").classList.remove("hidden");
-  ["overview", "items", "map", "settings"].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.classList.add("hidden");
-  });
 }
 function saveLocal(msg, opts) {
   const payload = cloudPayload();
@@ -4880,7 +5017,12 @@ function render() {
   applyMobileClass();
   // 有雲端登入需求時：未登入一律不顯示資料（即使腳本載入失敗也不放行）
   if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) {
-    renderLoginGate();
+    if (state.bootLoading) renderBootLoadGate();
+    else renderLoginGate();
+    return;
+  }
+  if (REQUIRE_CLOUD_LOGIN && state.bootLoading) {
+    renderBootLoadGate();
     return;
   }
   document.body.classList.remove("locked");
@@ -6371,6 +6513,7 @@ function patchItemField(itemIdx, field, raw) {
 
 async function cloudLogin() {
   try {
+    startBootLoadUI("正在開啟 Google 登入…");
     toast("正在登入…");
     const prevAccount = state.cloudAccount || "";
     // 已登入時按「重新登入」才跳出選帳戶；首次登入也可選帳
@@ -6387,17 +6530,20 @@ async function cloudLogin() {
     state.cloudAccount = nextAccount;
     startCloudWatch();
     hideSyncConflict();
+    startBootLoadUI("載入資料中…");
     // 登入後載入「此帳號」專案清單並切到作用中專案（含雲端進度）
     try {
       await ensureProjectsLoaded();
     } catch (e2) {
       console.warn(e2);
       toast("專案清單載入失敗：" + (e2.message || e2));
-      render();
     }
   } catch (e) {
     console.error(e);
     toast("登入失敗：" + (e.message || e));
+  } finally {
+    stopBootLoadUI();
+    render();
   }
 }
 async function cloudPull() {
@@ -6883,6 +7029,10 @@ document.body.addEventListener("click", ev => {
   }
   const projBtn = ev.target.closest("[data-project-id]");
   if (projBtn) {
+    if (state.projDragMoved) {
+      state.projDragMoved = false;
+      return;
+    }
     const id = projBtn.dataset.projectId;
     const proj = (state.projects || []).find(p => p.id === id);
     if (proj) activateProject(proj, { fromCloud: true });
@@ -7132,6 +7282,56 @@ document.body.addEventListener("contextmenu", ev => {
   ev.preventDefault();
   showPhotoPreview(idx);
 });
+
+// 左側專案列：按住拖曳上下排序
+(function bindProjectRailDrag() {
+  const host = document.getElementById("projectList");
+  if (!host) return;
+  host.addEventListener("dragstart", function (ev) {
+    const btn = ev.target.closest("[data-project-id]");
+    if (!btn || !host.contains(btn)) return;
+    state.projDragId = btn.dataset.projectId || "";
+    state.projDragMoved = false;
+    btn.classList.add("dragging");
+    try {
+      ev.dataTransfer.effectAllowed = "move";
+      ev.dataTransfer.setData("text/plain", state.projDragId);
+    } catch (e) {}
+  });
+  host.addEventListener("dragend", function (ev) {
+    const btn = ev.target.closest("[data-project-id]");
+    if (btn) btn.classList.remove("dragging");
+    host.querySelectorAll(".proj-btn.drag-over").forEach(function (el) {
+      el.classList.remove("drag-over");
+    });
+    state.projDragId = "";
+  });
+  host.addEventListener("dragover", function (ev) {
+    const over = ev.target.closest("[data-project-id]");
+    if (!over || !state.projDragId) return;
+    ev.preventDefault();
+    try { ev.dataTransfer.dropEffect = "move"; } catch (e) {}
+    host.querySelectorAll(".proj-btn.drag-over").forEach(function (el) {
+      if (el !== over) el.classList.remove("drag-over");
+    });
+    if (over.dataset.projectId !== state.projDragId) over.classList.add("drag-over");
+  });
+  host.addEventListener("dragleave", function (ev) {
+    const left = ev.target.closest("[data-project-id]");
+    if (left) left.classList.remove("drag-over");
+  });
+  host.addEventListener("drop", function (ev) {
+    const over = ev.target.closest("[data-project-id]");
+    if (!over) return;
+    ev.preventDefault();
+    const toId = over.dataset.projectId || "";
+    const fromId = state.projDragId || "";
+    over.classList.remove("drag-over");
+    if (!fromId || !toId || fromId === toId) return;
+    state.projDragMoved = true;
+    reorderProjects(fromId, toId);
+  });
+})();
 
 // 用 mousedown 執行選單，避免 click 前被關閉導致貼上失效
 document.body.addEventListener("mousedown", ev => {
