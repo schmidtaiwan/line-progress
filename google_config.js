@@ -23,6 +23,15 @@ window.GOOGLE_CONFIG = {
   // 舊版個人根（遷移來源；不再寫入）
   legacyProjectsRoot: "架線進度專案",
 
+  // 一次性：依雲端資料夾重寫 projects_index（寫入後帶 forceBuildId，同 ID 不重跑）
+  forceIndexBuildId: "20261102-all4",
+  forceIndexProjects: [
+    { id: "p-dip-auto", name: "DIP自動換線", arch: "equipment" },
+    { id: "p-r01-mep", name: "R01機電工程", arch: "hierarchy" },
+    { id: "p-r01-pre", name: "R01機電前置工程", arch: "equipment" },
+    { id: "vivo-r01", name: "VIVO R01", arch: "equipment", legacyFallback: true }
+  ],
+
   // 專案內統一檔名
   fileName: "line_data.json",
 

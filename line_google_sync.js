@@ -388,8 +388,15 @@
     });
   }
 
+  function forceIndexHints() {
+    const raw = cfg.forceIndexProjects;
+    if (!Array.isArray(raw) || !raw.length) return [];
+    return raw.map(normalizeProjectRecord);
+  }
+
   /** 以共用根底下「實體資料夾」重建專案清單，並清掉同名重複資料夾 */
-  function syncProjectsIndexFromDrive(rootId, hintList) {
+  function syncProjectsIndexFromDrive(rootId, hintList, opts) {
+    opts = opts || {};
     const hints = {};
     (hintList || []).forEach(function (p) {
       const k = normFolderKey(p && p.name);
@@ -403,7 +410,6 @@
         (groups[k] = groups[k] || []).push(f);
       });
       const keys = Object.keys(groups);
-      if (!keys.length) return [];
       let chain = Promise.resolve([]);
       keys.forEach(function (k) {
         chain = chain.then(function (acc) {
@@ -413,7 +419,8 @@
               const hint = hints[k] || {};
               const arch = (payload && payload.arch === "hierarchy") || hint.arch === "hierarchy"
                 ? "hierarchy" : "equipment";
-              const displayName = String(best.name || hint.name || k).trim() || k;
+              // 強制重建時優先用指定顯示名稱（與雲端資料夾一致）
+              const displayName = String((hint.name) || best.name || k).trim() || k;
               acc.push(normalizeProjectRecord({
                 id: hint.id || ("p-" + String(best.id).slice(0, 10)),
                 name: displayName,
@@ -429,14 +436,21 @@
         });
       });
       return chain.then(function (list) {
+        // 強制清單中有、但資料夾尚缺的：仍寫入 index（名稱對齊），不新建資料夾
+        Object.keys(hints).forEach(function (k) {
+          if (list.some(function (p) { return normFolderKey(p.name) === k; })) return;
+          list.push(normalizeProjectRecord(hints[k]));
+        });
         list.sort(function (a, b) {
           return String(a.name || "").localeCompare(String(b.name || ""), "zh-Hant");
         });
-        return putJsonInFolder(rootId, "projects_index.json", {
+        const payload = {
           savedAt: new Date().toISOString(),
           syncedFromFolders: true,
           projects: list
-        }).then(function () { return list; });
+        };
+        if (opts.forceBuildId) payload.forceBuildId = opts.forceBuildId;
+        return putJsonInFolder(rootId, "projects_index.json", payload).then(function () { return list; });
       });
     });
   }
@@ -450,7 +464,21 @@
         return withScopeRetry(function () {
           return ensureProjectsRootId().then(function (rootId) {
             return fetchJsonInFolder(rootId, "projects_index.json").then(function (data) {
+              const buildId = String(cfg.forceIndexBuildId || "").trim();
+              const forced = forceIndexHints();
+              const needForce = !!(buildId && forced.length && (!data || data.forceBuildId !== buildId));
               let hint = (data && Array.isArray(data.projects)) ? data.projects.map(normalizeProjectRecord) : [];
+              if (needForce) {
+                // 這次：強制把指定專案＋雲端資料夾全部寫進 index
+                const mergedHints = {};
+                hint.concat(forced).forEach(function (p) {
+                  const k = normFolderKey(p.name);
+                  if (!k) return;
+                  mergedHints[k] = Object.assign({}, mergedHints[k] || {}, p);
+                });
+                hint = Object.keys(mergedHints).map(function (k) { return normalizeProjectRecord(mergedHints[k]); });
+                return syncProjectsIndexFromDrive(rootId, hint, { forceBuildId: buildId });
+              }
               return syncProjectsIndexFromDrive(rootId, hint).then(function (fromFolders) {
                 if (fromFolders && fromFolders.length) return fromFolders;
                 return migrateIntoSharedRootIfNeeded(rootId, hint).then(function (migrated) {
