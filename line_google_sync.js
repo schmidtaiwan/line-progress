@@ -326,26 +326,13 @@
     const q = "name='" + safe + "' and trashed=false" + parentQueryClause(folderId);
     return driveListByQuery(q).then(function (files) {
       if (!files.length) return null;
-      // 多份同名時：專案清單取「專案數最多」；其餘取最新
-      if (String(name) === "projects_index.json" && files.length > 1) {
-        let chain = Promise.resolve({ best: null, bestN: -1, bestFile: files[0] });
-        files.forEach(function (f) {
-          chain = chain.then(function (acc) {
-            return fetchJsonById(f.id).then(function (data) {
-              const n = (data && Array.isArray(data.projects)) ? data.projects.length : 0;
-              if (n > acc.bestN) {
-                return { best: data, bestN: n, bestFile: f };
-              }
-              return acc;
-            });
-          });
-        });
-        return chain.then(function (acc) {
-          const keepId = acc.bestFile && acc.bestFile.id;
-          const trashOthers = files.filter(function (f) { return f.id !== keepId; }).map(function (f) {
-            return trashDriveFile(f.id);
-          });
-          return Promise.all(trashOthers).then(function () { return acc.best; });
+      // 多份同名：一律取最新（modifiedTime desc）；舊的進垃圾桶
+      // ※ 不可再「專案數最多」——刪案後較小的新清單會被舊的四案清單蓋回
+      if (files.length > 1) {
+        const keep = files[0];
+        const trashOthers = files.slice(1).map(function (f) { return trashDriveFile(f.id); });
+        return Promise.all(trashOthers).then(function () {
+          return fetchJsonById(keep.id);
         });
       }
       return fetchJsonById(files[0].id);
@@ -487,11 +474,13 @@
         });
       });
       return chain.then(function (list) {
-        // 強制清單中有、但資料夾尚缺的：仍寫入 index（名稱對齊），不新建資料夾
-        Object.keys(hints).forEach(function (k) {
-          if (list.some(function (p) { return normFolderKey(p.name) === k; })) return;
-          list.push(normalizeProjectRecord(hints[k]));
-        });
+        // 預設：只認實體資料夾。缺資料夾的 hint 不再幽靈寫回（否則刪案重整又出現）
+        if (opts.seedMissing) {
+          Object.keys(hints).forEach(function (k) {
+            if (list.some(function (p) { return normFolderKey(p.name) === k; })) return;
+            list.push(normalizeProjectRecord(hints[k]));
+          });
+        }
         list.sort(function (a, b) {
           return String(a.name || "").localeCompare(String(b.name || ""), "zh-Hant");
         });
@@ -500,10 +489,31 @@
           syncedFromFolders: true,
           projects: list
         };
-        if (opts.forceBuildId) payload.forceBuildId = opts.forceBuildId;
+        const buildId = String(opts.forceBuildId || cfg.forceIndexBuildId || "").trim();
+        if (buildId) payload.forceBuildId = buildId;
         return putJsonInFolder(rootId, "projects_index.json", payload).then(function () { return list; });
       });
     });
+  }
+
+  /** 只讀 projects_index，不依資料夾重建（刪案用，避免刪前又把資料夾同步回來） */
+  function readProjectsIndexRaw() {
+    return ensureInit()
+      .then(function () {
+        if (!state.account) return login({ prompt: "consent" });
+      })
+      .then(function () {
+        return withScopeRetry(function () {
+          return ensureProjectsRootId().then(function (rootId) {
+            return fetchJsonInFolder(rootId, "projects_index.json").then(function (data) {
+              const list = (data && Array.isArray(data.projects))
+                ? data.projects.map(normalizeProjectRecord)
+                : [];
+              return { rootId: rootId, data: data || null, list: list };
+            });
+          });
+        });
+      });
   }
 
   function loadProjectsIndex() {
@@ -520,7 +530,7 @@
               const needForce = !!(buildId && forced.length && (!data || data.forceBuildId !== buildId));
               let hint = (data && Array.isArray(data.projects)) ? data.projects.map(normalizeProjectRecord) : [];
               if (needForce) {
-                // 這次：強制把指定專案＋雲端資料夾全部寫進 index
+                // 只把設定當「名稱／id 提示」對齊現有資料夾；不再把已刪專案幽靈加回
                 const mergedHints = {};
                 hint.concat(forced).forEach(function (p) {
                   const k = normFolderKey(p.name);
@@ -528,16 +538,17 @@
                   mergedHints[k] = Object.assign({}, mergedHints[k] || {}, p);
                 });
                 hint = Object.keys(mergedHints).map(function (k) { return normalizeProjectRecord(mergedHints[k]); });
-                return syncProjectsIndexFromDrive(rootId, hint, { forceBuildId: buildId });
+                return syncProjectsIndexFromDrive(rootId, hint, { forceBuildId: buildId, seedMissing: false });
               }
-              return syncProjectsIndexFromDrive(rootId, hint).then(function (fromFolders) {
+              return syncProjectsIndexFromDrive(rootId, hint, { forceBuildId: buildId }).then(function (fromFolders) {
                 if (fromFolders && fromFolders.length) return fromFolders;
                 return migrateIntoSharedRootIfNeeded(rootId, hint).then(function (migrated) {
-                  return syncProjectsIndexFromDrive(rootId, migrated || hint).then(function (again) {
+                  return syncProjectsIndexFromDrive(rootId, migrated || hint, { forceBuildId: buildId }).then(function (again) {
                     if (again && again.length) return again;
                     const list = defaultProjectsList().map(normalizeProjectRecord);
                     return putJsonInFolder(rootId, "projects_index.json", {
                       savedAt: new Date().toISOString(),
+                      forceBuildId: buildId || undefined,
                       projects: list
                     }).then(function () { return list; });
                   });
@@ -551,6 +562,7 @@
 
   function saveProjectsIndex(projects) {
     const list = Array.isArray(projects) ? projects : [];
+    const buildId = String(cfg.forceIndexBuildId || "").trim();
     return ensureInit()
       .then(function () {
         if (!state.account) return login();
@@ -558,10 +570,13 @@
       .then(function () {
         return withScopeRetry(function () {
           return ensureProjectsRootId().then(function (rootId) {
-            return putJsonInFolder(rootId, "projects_index.json", {
+            const payload = {
               savedAt: new Date().toISOString(),
               projects: list
-            }).then(function () { return list; });
+            };
+            // 必須帶上 forceBuildId，否則下次載入會再跑強制清單把已刪專案加回
+            if (buildId) payload.forceBuildId = buildId;
+            return putJsonInFolder(rootId, "projects_index.json", payload).then(function () { return list; });
           });
         });
       });
@@ -647,10 +662,22 @@
   function deleteProject(projectId) {
     const id = String(projectId || "");
     if (!id) return Promise.reject(new Error("缺少專案 ID"));
-    return loadProjectsIndex().then(function (list) {
-      const hit = list.find(function (p) { return p && p.id === id; });
+    // 用 raw 讀取，避免 loadProjectsIndex 先依資料夾把專案同步回來
+    return readProjectsIndexRaw().then(function (raw) {
+      let list = (raw && raw.list) || [];
+      let hit = list.find(function (p) { return p && p.id === id; });
+      // index 過期時，仍允許用目前作用中專案刪資料夾
+      if (!hit && activeProject && String(activeProject.id) === id) {
+        hit = normalizeProjectRecord(activeProject);
+      }
       if (!hit) throw new Error("找不到要刪除的專案");
-      const next = list.filter(function (p) { return p.id !== id; });
+      const next = list.filter(function (p) {
+        if (!p) return false;
+        if (p.id === id) return false;
+        // 同名也一併從清單拿掉，避免 id 不一致又殘留
+        if (normFolderKey(p.name) === normFolderKey(hit.name)) return false;
+        return true;
+      });
       // 先刪雲端資料夾，再更新清單（失敗則整筆中止，避免清單沒了資料夾還在）
       return deleteProjectFolder(hit).then(function () {
         return saveProjectsIndex(next).then(function () { return next; });
