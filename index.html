@@ -1805,7 +1805,6 @@
     <div class="top-right">
       <span class="page-ver" id="pageVer">版次 —</span>
       <div class="top-actions">
-        <button type="button" class="icon-hover-btn settings" data-open-settings title="製程段／階段／時程設定"><span class="ico">⚙</span><span class="lbl">設定</span></button>
         <div class="import-wrap">
           <button type="button" class="icon-hover-btn" data-import-menu title="匯入 Excel／JSON／雲端歷史"><span class="ico">📥</span><span class="lbl">匯入</span></button>
           <div class="import-menu" id="importMenu">
@@ -1927,7 +1926,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, itemsSettingsOpen: true, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, stageRecCtx: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, itemsSettingsOpen: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, stageRecCtx: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1938,7 +1937,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 110;
+const PAGE_BUILD = 111;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -8142,6 +8141,7 @@ document.body.addEventListener("click", ev => {
     return;
   }
   if (ev.target.closest("[data-open-settings]")) {
+    // 右上設定已移除；改導向清單內結構設定
     toggleExportMenu(false);
     if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) {
       toast("請先登入再進入設定");
@@ -8151,8 +8151,13 @@ document.body.addEventListener("click", ev => {
       toast("請先點左側單一專案再進入設定");
       return;
     }
-    state.tab = "settings";
+    state.itemsSettingsOpen = true;
+    state.tab = "items";
     render();
+    const block = document.getElementById("itemsSettingsBlock");
+    if (block) {
+      try { block.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) {}
+    }
     return;
   }
   if (ev.target.closest("[data-goto-hier-items]")) {
