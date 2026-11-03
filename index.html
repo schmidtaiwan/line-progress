@@ -1846,7 +1846,7 @@
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
 <script src="line_sheets_codec.js?v=71"></script>
-<script src="line_google_sync.js?v=94"></script>
+<script src="line_google_sync.js?v=95"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 let STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1868,7 +1868,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 94;
+const PAGE_BUILD = 95;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -3868,14 +3868,14 @@ function railIconBtn(attrs, ico, label, extraClass) {
 function railCloudHtml() {
   const logged = isCloudLoggedIn();
   if (!logged) {
-    return railIconBtn('data-cloud-login title="登入 Google"', "🔑", "登入 Google");
+    return `<button type="button" class="rail-icon-btn" title="登入 Google" onclick="window.lineCloudLogin && window.lineCloudLogin(event)"><span class="ico">🔑</span><span class="lbl">登入 Google</span></button>`;
   }
   const n = (window.LineOneDrive && LineOneDrive.state && LineOneDrive.state.viewers) || 0;
   return `
     <span class="rail-icon-btn viewer" id="viewerBadge" title="同一 Google 帳號在不同裝置／分頁登入會分別計算">
       <span class="ico">👁</span><span class="lbl">連線查看：${n} 個</span>
     </span>
-    ${railIconBtn('data-cloud-login title="重新登入／換帳"', "🔄", "重新登入")}
+    ${railIconBtn('data-cloud-relogin title="重新登入／換帳"', "🔄", "重新登入")}
     ${railIconBtn('data-cloud-pull title="從雲端載入目前專案"', "☁", "從雲端載入")}
     ${railIconBtn('data-cloud-logout title="登出"', "🚪", "登出", "danger")}
   `;
@@ -3893,10 +3893,11 @@ function cloudBarHtml() {
   const saveLabel = state.dirty ? "儲存＊" : "儲存";
   const msg = escapeHtml(window.LineOneDrive ? LineOneDrive.statusText() : "雲端模組未載入");
   // 未登入時左側專案列隱藏，登入鈕必須留在 cloud bar（登入閘道）
+  // onclick 直連：比事件委派更能保留瀏覽器「使用者手勢」，避免彈窗被擋
   if (!logged) {
     return `<div class="cloud-bar" id="cloudBar">
       <span class="msg">${msg}</span>
-      <button type="button" class="btn-cloud" data-cloud-login>🔑 登入 Google</button>
+      <button type="button" class="btn-cloud" id="btnGoogleLogin" onclick="window.lineCloudLogin && window.lineCloudLogin(event)">🔑 登入 Google</button>
     </div>`;
   }
   return `<div class="cloud-bar" id="cloudBar">
@@ -7517,7 +7518,8 @@ function patchItemField(itemIdx, field, raw) {
   }
 }
 
-async function cloudLogin() {
+async function cloudLogin(opts) {
+  opts = opts || {};
   if (state.cloudLoginBusy) {
     toast("登入視窗已開啟，請先完成或按取消");
     return;
@@ -7531,11 +7533,12 @@ async function cloudLogin() {
   try {
     // 重要：requestAccessToken 必須在點擊的同步堆疊內觸發。
     // 不可先 await／重繪（startBootLoadUI），否則瀏覽器會封鎖 Google 彈窗。
-    toast("正在開啟 Google 登入視窗…");
-    const switchAccount = true;
+    // 首次登入不要強制 select_account（較不易被擋）；重新登入／換帳才強制選帳戶
+    const switchAccount = opts.switchAccount === true;
+    toast(switchAccount ? "請選擇 Google 帳戶…" : "正在登入 Google…");
     const loginPromise = LineOneDrive.login({ switchAccount: switchAccount });
     // 彈窗請求已送出後，再顯示等待畫面
-    startBootLoadUI("請在 Google 視窗完成登入…");
+    startBootLoadUI(switchAccount ? "請選擇 Google 帳戶…" : "請在 Google 視窗完成登入…");
     await loginPromise;
     const nextAccount = accountScopeKey();
     // 換帳：清掉舊帳左側清單與本機畫面，再載入新帳號雲端專案
@@ -7566,6 +7569,11 @@ async function cloudLogin() {
     render();
   }
 }
+// 給登入按鈕 onclick 直連（保留使用者手勢，避免彈窗被擋）
+window.lineCloudLogin = function (ev) {
+  try { if (ev && ev.preventDefault) ev.preventDefault(); } catch (e) {}
+  cloudLogin({ switchAccount: false });
+};
 async function cloudPull() {
   try {
     if (!isCloudLoggedIn()) {
@@ -7820,7 +7828,14 @@ document.body.addEventListener("click", ev => {
     cancelBootOrLogin();
     return;
   }
-  if (ev.target.closest("[data-cloud-login]")) { cloudLogin(); return; }
+  if (ev.target.closest("[data-cloud-relogin]")) {
+    cloudLogin({ switchAccount: true });
+    return;
+  }
+  if (ev.target.closest("[data-cloud-login]")) {
+    cloudLogin({ switchAccount: false });
+    return;
+  }
   if (ev.target.closest("[data-cloud-pull]")) { cloudPull(); return; }
   if (ev.target.closest("[data-sheets-reload]")) {
     renderSheetsEmbed();
