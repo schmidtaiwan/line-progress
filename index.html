@@ -1261,6 +1261,29 @@
     white-space: nowrap;
   }
   .settings-unified { display: flex; flex-direction: column; gap: 14px; }
+  .items-settings-block {
+    margin: 0 0 14px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #f7fafc;
+    overflow: hidden;
+  }
+  .items-settings-block > .items-settings-toggle {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    border: 0; background: transparent; padding: 12px 14px;
+    font: inherit; font-weight: 700; cursor: pointer; text-align: left; color: var(--ink);
+  }
+  .items-settings-block > .items-settings-toggle:hover { background: #eef4f8; }
+  .items-settings-block > .items-settings-toggle .chev { color: var(--muted); font-size: 12px; }
+  .items-settings-block > .items-settings-toggle .hint-inline {
+    margin-left: auto; font-weight: 500; font-size: 12px; color: var(--muted);
+  }
+  .items-settings-body { padding: 0 12px 14px; }
+  .items-settings-body .settings-panel { background: #fff; }
+  .ov-stage-range[data-open-items-settings],
+  .ov-stage-name[data-open-items-settings] { cursor: pointer; }
+  .ov-stage-range[data-open-items-settings]:hover,
+  .ov-stage-name[data-open-items-settings]:hover { text-decoration: underline; color: #0f4c81; }
   .settings-structure {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1904,7 +1927,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, stageRecCtx: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, itemsSettingsOpen: true, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, stageRecCtx: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1915,7 +1938,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 109;
+const PAGE_BUILD = 110;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -5560,8 +5583,8 @@ function overviewStageHeadHtml() {
     if (uniq.length === 1) sub = uniq[0];
     else if (uniq.length > 1) sub = "各製程段不同";
     return `<th class="ov-stage-th">
-      <div class="ov-stage-name">${escapeHtml(s.name || s.mark || "")}</div>
-      ${sub ? `<div class="ov-stage-range" title="${escapeAttr(uniq.join(" ／ "))}">${escapeHtml(sub)}</div>` : `<div class="ov-stage-range empty">未設定</div>`}
+      <div class="ov-stage-name" data-open-items-settings title="點此編輯階段／時程設定">${escapeHtml(s.name || s.mark || "")}</div>
+      ${sub ? `<div class="ov-stage-range" data-open-items-settings title="${escapeAttr(uniq.join(" ／ ") + "｜點此編輯時程")}">${escapeHtml(sub)}</div>` : `<div class="ov-stage-range empty" data-open-items-settings title="點此設定預計開始／完成">未設定</div>`}
     </th>`;
   }).join("");
 }
@@ -6024,6 +6047,19 @@ function refreshItemsDetailOnly(scrollSave) {
   pinEqListScroll(saved);
 }
 
+
+function itemsInlineSettingsHtml() {
+  const open = !!state.itemsSettingsOpen;
+  return `<div class="items-settings-block" id="itemsSettingsBlock">
+    <button type="button" class="items-settings-toggle" data-toggle-items-settings aria-expanded="${open ? "true" : "false"}">
+      <span class="chev">${open ? "▼" : "▶"}</span>
+      <span>⚙ 結構設定（製程段／階段／設備／時程）</span>
+      <span class="hint-inline">${open ? "點此收合" : "點此展開，可直接改設定"}</span>
+    </button>
+    ${open ? `<div class="items-settings-body">${buildSettingsBodyHtml({ includeTree: false })}</div>` : ""}
+  </div>`;
+}
+
 function renderItems() {
   stopStageVoice();
   const scrollSave = state._eqListScroll || captureEqListScroll();
@@ -6036,8 +6072,11 @@ function renderItems() {
     const stageRecEmpty = buildStageRecordsMatrixRows(colNEmpty);
     document.getElementById("items").innerHTML = `
       ${toolbar(`<label><input type="checkbox" id="onlyHigh" ${state.onlyHigh ? "checked" : ""}> 只看高急迫</label>`)}
+      <div class="section-head">
       <h2 class="section-title">工作項目清單（總表展開）</h2>
-      <p class="note">沒有符合的設備；仍可在「總記錄」登記各階段重要／共同／會議事項。</p>
+    </div>
+    ${itemsInlineSettingsHtml()}
+      <p class="note">沒有符合的設備；仍可在「總記錄」登記各階段重要／共同／會議事項。上方可直接維護製程段／階段／設備／時程。</p>
       <div class="scroll"><table class="ov-eq-table items-matrix">
         <thead><tr><th>項次</th><th>製程段</th><th>設備名稱</th>${stageHeadsEmpty}<th>整體</th><th>延誤數</th></tr></thead>
         <tbody>${stageRecEmpty}<tr><td colspan="${colNEmpty}">沒有符合的設備</td></tr></tbody>
@@ -6090,8 +6129,11 @@ function renderItems() {
   const stageRecRows = buildStageRecordsMatrixRows(colN);
   document.getElementById("items").innerHTML = `
     ${toolbar(`<label><input type="checkbox" id="onlyHigh" ${state.onlyHigh ? "checked" : ""}> 只看高急迫</label>`)}
-    <h2 class="section-title">工作項目清單（總表展開）</h2>
-    <p class="note">表頭下「總記錄」可展開各階段重要事項／共同事項／會議記錄。點各設備階段儲存格可展開細項；再點一次可收合。</p>
+    <div class="section-head">
+      <h2 class="section-title">工作項目清單（總表展開）</h2>
+    </div>
+    ${itemsInlineSettingsHtml()}
+    <p class="note">上方可直接設定製程段／階段／設備／時程。表頭下「總記錄」可展開各階段重要事項／共同事項／會議記錄。點各設備階段儲存格可展開細項；再點一次可收合。階段欄「未設定」可點進去補時程。</p>
     <div class="scroll"><table class="ov-eq-table items-matrix">
       <thead><tr><th>項次</th><th>製程段</th><th>設備名稱</th>${stageHeads}<th>整體</th><th>延誤數</th></tr></thead>
       <tbody>${stageRecRows}${rows || `<tr><td colspan="${colN}">沒有符合的設備</td></tr>`}</tbody>
@@ -6261,7 +6303,7 @@ function renderSheetsEmbed() {
     </div>`;
 }
 
-function renderSettings() {
+function prepareSettingsData() {
   if (!Array.isArray(DATA.stages)) DATA.stages = [];
   if (!Array.isArray(DATA.segOrder)) DATA.segOrder = [];
   if (!Array.isArray(DATA.milestones)) DATA.milestones = [];
@@ -6284,6 +6326,13 @@ function renderSettings() {
     });
   }
   annotateNodeKinds(DATA.nodes);
+}
+
+/** 設定頁主體（①～④；可選⑤）。清單紅框可內嵌同一份。 */
+function buildSettingsBodyHtml(opts) {
+  const o = opts || {};
+  const includeTree = o.includeTree !== false;
+  prepareSettingsData();
   const segRows = DATA.segOrder.map((seg, i) => `
     <div class="set-row set-seg-row" data-set-seg-i="${i}">
       <div class="idx">${i + 1}</div>
@@ -6319,9 +6368,22 @@ function renderSettings() {
     }).join("");
     return `<tr><th>${escapeHtml(m.seg)}</th>${cells}</tr>`;
   }).join("");
-  document.getElementById("settings").innerHTML = `
-    ${cloudBarHtml()}
-    <p class="note">共用設定：① 製程段／群組 ② 階段 ③ 設備主檔 ④ 群組×階段時程 ⑤ 結構樹工具。有設備時清單走 checklist；僅有樹時走層級編輯。變更寫入本機；同步雲端請按「儲存」。</p>
+  const treeSection = includeTree ? `
+      <section class="settings-panel full">
+        <h2>⑤ 結構樹／匯入</h2>
+        <p class="hint">樹狀工作項請至「清單」編輯；此處提供重算與匯入。新增設備後會自動改走設備 checklist 畫面。</p>
+        <div class="toolbar" style="margin-bottom:10px">
+          <button type="button" class="btn-cloud" data-hier-rollup>依下層重算完成率</button>
+          <button type="button" class="btn-cloud" data-hier-import-pdf title="匯入晶睿TY2 R02 電力／CDA／排氣進度表">匯入 PDF 水電進度表</button>
+          <button type="button" class="btn-cloud" data-goto-hier-items>前往清單編輯結構</button>
+        </div>
+        <p class="note">目前節點 ${ (DATA.nodes || []).length }　｜　設備 ${ (DATA.equipment || []).length }　｜　階段 ${ (DATA.stages || []).length }</p>
+      </section>` : "";
+  const note = includeTree
+    ? `<p class="note">共用設定：① 製程段／群組 ② 階段 ③ 設備主檔 ④ 群組×階段時程 ⑤ 結構樹工具。有設備時清單走 checklist；僅有樹時走層級編輯。變更寫入本機；同步雲端請按「儲存」。</p>`
+    : `<p class="note">可直接在此調整①製程段／群組、②階段、③設備主檔、④各製程段×階段時程；變更即寫入本機，同步雲端請按「儲存」。完整設定頁也可由左上「⚙ 設定」進入。</p>`;
+  return `
+    ${note}
     <div class="settings-unified">
       <div class="settings-structure">
         <section class="settings-panel">
@@ -6354,17 +6416,14 @@ function renderSettings() {
           <tbody>${mileBody || `<tr><td colspan="${1 + Math.max(1, DATA.stages.length)}">請先新增製程段與階段</td></tr>`}</tbody>
         </table></div>
       </section>
-      <section class="settings-panel full">
-        <h2>⑤ 結構樹／匯入</h2>
-        <p class="hint">樹狀工作項請至「清單」編輯；此處提供重算與匯入。新增設備後會自動改走設備 checklist 畫面。</p>
-        <div class="toolbar" style="margin-bottom:10px">
-          <button type="button" class="btn-cloud" data-hier-rollup>依下層重算完成率</button>
-          <button type="button" class="btn-cloud" data-hier-import-pdf title="匯入晶睿TY2 R02 電力／CDA／排氣進度表">匯入 PDF 水電進度表</button>
-          <button type="button" class="btn-cloud" data-goto-hier-items>前往清單編輯結構</button>
-        </div>
-        <p class="note">目前節點 ${ (DATA.nodes || []).length }　｜　設備 ${ (DATA.equipment || []).length }　｜　階段 ${ (DATA.stages || []).length }</p>
-      </section>
+      ${treeSection}
     </div>`;
+}
+
+function renderSettings() {
+  document.getElementById("settings").innerHTML = `
+    ${cloudBarHtml()}
+    ${buildSettingsBodyHtml({ includeTree: true })}`;
 }
 
 function swapArr(arr, i, j) {
@@ -8065,6 +8124,23 @@ async function cloudPushAllProjects() {
 }
 
 document.body.addEventListener("click", ev => {
+  if (ev.target.closest("[data-toggle-items-settings]")) {
+    state.itemsSettingsOpen = !state.itemsSettingsOpen;
+    if (state.tab !== "items") state.tab = "items";
+    render();
+    return;
+  }
+  if (ev.target.closest("[data-open-items-settings]")) {
+    state.itemsSettingsOpen = true;
+    if (state.tab !== "items") state.tab = "items";
+    render();
+    const block = document.getElementById("itemsSettingsBlock");
+    if (block) {
+      try { block.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (e) {}
+    }
+    toast("已展開結構設定，可直接改製程段／階段／設備／時程");
+    return;
+  }
   if (ev.target.closest("[data-open-settings]")) {
     toggleExportMenu(false);
     if (REQUIRE_CLOUD_LOGIN && !isCloudLoggedIn()) {
