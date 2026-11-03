@@ -18,6 +18,8 @@
     viewerList: []
   };
   let tokenClient = null;
+  /** 進行中的 token 請求（error_callback／取消／逾時用來結束 Promise） */
+  let pendingToken = null;
   let uploadTimer = null;
   let cachedFolderId = "";
   let presenceTimer = null;
@@ -1520,6 +1522,21 @@
 
   function initMsal() { return ensureInit(); }
 
+  function settlePendingToken(fn) {
+    const pending = pendingToken;
+    pendingToken = null;
+    if (!pending || pending.settled) return;
+    pending.settled = true;
+    if (pending.timer) clearTimeout(pending.timer);
+    fn(pending);
+  }
+
+  function cancelPendingLogin(message) {
+    settlePendingToken(function (pending) {
+      pending.reject(new Error(message || "已取消登入"));
+    });
+  }
+
   function ensureInit() {
     const id = (cfg.clientId || "").trim();
     if (!id || id.indexOf("PLEASE_") === 0) {
@@ -1530,28 +1547,75 @@
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: id,
         scope: SCOPES,
-        callback: function () {}
+        callback: function (resp) {
+          settlePendingToken(function (pending) {
+            if (resp && resp.error) {
+              pending.reject(new Error(resp.error_description || resp.error));
+              return;
+            }
+            state.token = (resp && resp.access_token) || "";
+            pending.resolve(state.token);
+          });
+        },
+        error_callback: function (err) {
+          settlePendingToken(function (pending) {
+            const typ = (err && err.type) || "";
+            let msg = "Google 登入失敗，請再試一次";
+            if (typ === "popup_failed_to_open") {
+              msg = "無法開啟 Google 登入視窗（可能被瀏覽器封鎖）。請允許彈出式視窗後再按登入";
+            } else if (typ === "popup_closed") {
+              msg = "已關閉 Google 登入視窗，請再按「登入 Google」";
+            } else if (err && (err.message || err.type)) {
+              msg = "Google 登入失敗：" + (err.message || err.type);
+            }
+            pending.reject(new Error(msg));
+          });
+        }
       });
       state.ready = true;
     });
   }
 
-  function requestToken(prompt, hintEmail) {
-    return ensureInit().then(function () {
-      return new Promise(function (resolve, reject) {
-        tokenClient.callback = function (resp) {
-          if (resp.error) {
-            reject(new Error(resp.error_description || resp.error));
-            return;
-          }
-          state.token = resp.access_token;
-          resolve(resp.access_token);
-        };
-        const req = { prompt: prompt || "" };
-        // 已登入時帶 hint，避免「從雲端載入」又跳出選帳戶
-        if (hintEmail) req.hint = hintEmail;
+  /** 已就緒時必須同步呼叫 requestAccessToken，保留 click 手勢 */
+  function requestTokenSync(prompt, hintEmail, timeoutMs) {
+    if (!tokenClient || !state.ready) {
+      return Promise.reject(new Error("Google 登入尚未就緒，請再按一次「登入 Google」"));
+    }
+    return new Promise(function (resolve, reject) {
+      if (pendingToken && !pendingToken.settled) {
+        settlePendingToken(function (pending) {
+          pending.reject(new Error("已取消前一次登入，請再試一次"));
+        });
+      }
+      const waitMs = Math.max(12000, Number(timeoutMs) || 90000);
+      const pending = { settled: false, timer: null, resolve: resolve, reject: reject };
+      pending.timer = setTimeout(function () {
+        if (pending.settled) return;
+        pending.settled = true;
+        if (pendingToken === pending) pendingToken = null;
+        reject(new Error("登入逾時。若沒看到 Google 視窗，請允許彈出式視窗後再試"));
+      }, waitMs);
+      pendingToken = pending;
+      const req = { prompt: prompt || "" };
+      if (hintEmail) req.hint = hintEmail;
+      try {
         tokenClient.requestAccessToken(req);
-      });
+      } catch (e) {
+        if (pending.settled) return;
+        pending.settled = true;
+        clearTimeout(pending.timer);
+        if (pendingToken === pending) pendingToken = null;
+        reject(e);
+      }
+    });
+  }
+
+  function requestToken(prompt, hintEmail, timeoutMs) {
+    if (state.ready && tokenClient) {
+      return requestTokenSync(prompt, hintEmail, timeoutMs);
+    }
+    return ensureInit().then(function () {
+      return Promise.reject(new Error("Google 元件剛就緒，請再按一次「登入 Google」以開啟視窗"));
     });
   }
 
@@ -2702,6 +2766,7 @@
     initMsal: initMsal,
     ensureInit: ensureInit,
     login: login,
+    cancelPendingLogin: cancelPendingLogin,
     logout: logout,
     accountEmail: accountEmail,
     isSharedProjectsRoot: isSharedProjectsRoot,

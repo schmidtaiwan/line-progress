@@ -1846,7 +1846,7 @@
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
 <script src="line_sheets_codec.js?v=71"></script>
-<script src="line_google_sync.js?v=98"></script>
+<script src="line_google_sync.js?v=99"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 let STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1857,7 +1857,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, cloudLoginBusy: false, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1868,7 +1868,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 98;
+const PAGE_BUILD = 99;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -3836,14 +3836,14 @@ function railIconBtn(attrs, ico, label, extraClass) {
 function railCloudHtml() {
   const logged = isCloudLoggedIn();
   if (!logged) {
-    return railIconBtn('data-cloud-login title="登入 Google"', "🔑", "登入 Google");
+    return `<button type="button" class="rail-icon-btn" title="登入 Google" onclick="window.lineCloudLogin && window.lineCloudLogin(event)"><span class="ico">🔑</span><span class="lbl">登入 Google</span></button>`;
   }
   const n = (window.LineOneDrive && LineOneDrive.state && LineOneDrive.state.viewers) || 0;
   return `
     <span class="rail-icon-btn viewer" id="viewerBadge" title="同一 Google 帳號在不同裝置／分頁登入會分別計算">
       <span class="ico">👁</span><span class="lbl">連線查看：${n} 個</span>
     </span>
-    ${railIconBtn('data-cloud-login title="重新登入／換帳"', "🔄", "重新登入")}
+    ${railIconBtn('data-cloud-relogin title="重新登入／換帳"', "🔄", "重新登入")}
     ${railIconBtn('data-cloud-pull title="從雲端載入目前專案"', "☁", "從雲端載入")}
     ${railIconBtn('data-cloud-logout title="登出"', "🚪", "登出", "danger")}
   `;
@@ -3864,7 +3864,7 @@ function cloudBarHtml() {
   if (!logged) {
     return `<div class="cloud-bar" id="cloudBar">
       <span class="msg">${msg}</span>
-      <button type="button" class="btn-cloud" data-cloud-login>🔑 登入 Google</button>
+      <button type="button" class="btn-cloud" id="btnGoogleLogin" onclick="window.lineCloudLogin && window.lineCloudLogin(event)">🔑 登入 Google</button>
     </div>`;
   }
   return `<div class="cloud-bar" id="cloudBar">
@@ -3878,7 +3878,7 @@ function updateCloudBar() {
   if (!el || !window.LineOneDrive) return;
   const logged = isCloudLoggedIn();
   const hasSave = !!el.querySelector("[data-cloud-push]");
-  const hasLogin = !!el.querySelector("[data-cloud-login]");
+  const hasLogin = !!el.querySelector("[data-cloud-login], #btnGoogleLogin");
   if ((!logged && hasSave) || (logged && !hasSave) || (!logged && !hasLogin) || (logged && hasLogin)) {
     el.outerHTML = cloudBarHtml();
     return;
@@ -3917,7 +3917,8 @@ function startBootLoadUI(phase) {
   state.bootLoadPhase = phase || "載入資料中…";
   if (!state.bootLoadStartedAt) state.bootLoadStartedAt = Date.now();
   if (state.bootLoadTimer) clearInterval(state.bootLoadTimer);
-  state.bootLoadTimer = setInterval(updateBootLoadTimerDom, 250);
+  // 1s 更新即可，避免登入彈窗期間過度佔用主執行緒
+  state.bootLoadTimer = setInterval(updateBootLoadTimerDom, 1000);
   renderBootLoadGate();
 }
 
@@ -3961,19 +3962,42 @@ function prepareLockedShell() {
 
 function renderBootLoadGate() {
   prepareLockedShell();
+  const logged = isCloudLoggedIn();
   const phase = escapeHtml(state.bootLoadPhase || "載入資料中…");
   const t = formatBootLoadTimer(bootLoadElapsedSec());
+  const title = logged ? "正在載入專案" : "登入進行中";
+  const desc = logged
+    ? "已登入 Google，正在載入雲端專案與進度資料。"
+    : "請在跳出的 Google 視窗完成登入。若沒有跳出視窗，請檢查是否封鎖彈出視窗；也可按「取消」後再登入。";
+  const actions = logged
+    ? cloudBarHtml()
+    : `<div class="cloud-bar" id="cloudBar">
+        <span class="msg">等待 Google 登入視窗回應…</span>
+        <button type="button" class="btn-cloud ghost" data-boot-cancel>✖ 取消</button>
+      </div>`;
   document.getElementById("weekly").innerHTML = `
     <div class="login-gate">
-      <h2>登入後繼續</h2>
-      <p>已登入 Google，正在載入雲端專案與進度資料。</p>
+      <h2>${title}</h2>
+      <p>${desc}</p>
       <div class="boot-load-status" role="status" aria-live="polite">
         <p class="phase" id="bootLoadPhase">${phase}</p>
         <p class="timer" id="bootLoadTimer">${t}</p>
-        <p class="hint">載入資料中，請稍候…</p>
+        <p class="hint">${logged ? "載入資料中，請稍候…" : "完成登入後會自動載入專案"}</p>
       </div>
-      ${cloudBarHtml()}
+      ${actions}
     </div>`;
+}
+
+function cancelBootOrLogin() {
+  state.cloudLoginBusy = false;
+  try {
+    if (window.LineOneDrive && typeof LineOneDrive.cancelPendingLogin === "function") {
+      LineOneDrive.cancelPendingLogin("已取消登入");
+    }
+  } catch (e) {}
+  stopBootLoadUI();
+  toast("已取消，可再按「登入 Google」");
+  render();
 }
 
 function renderLoginGate() {
@@ -7467,15 +7491,27 @@ function patchItemField(itemIdx, field, raw) {
   }
 }
 
-async function cloudLogin() {
+async function cloudLogin(opts) {
+  opts = opts || {};
+  if (state.cloudLoginBusy) {
+    toast("登入視窗已開啟，請先完成或按取消");
+    return;
+  }
+  if (!window.LineOneDrive) {
+    toast("雲端模組未載入，請重新整理");
+    return;
+  }
+  state.cloudLoginBusy = true;
+  const prevAccount = state.cloudAccount || "";
   try {
-    startBootLoadUI("正在開啟 Google 登入…");
-    toast("正在登入…");
-    const prevAccount = state.cloudAccount || "";
-    // 已登入時按「重新登入」才跳出選帳戶；首次登入也可選帳
-    await LineOneDrive.login({ switchAccount: true });
+    // 必須先開 Google 彈窗，再重繪等待畫面（否則會失去 click 手勢、彈窗被擋）
+    // 首次登入不強制選帳戶；只有「重新登入」才 select_account
+    const switchAccount = opts.switchAccount === true;
+    toast(switchAccount ? "請選擇 Google 帳戶…" : "正在登入 Google…");
+    const loginPromise = LineOneDrive.login({ switchAccount: switchAccount });
+    startBootLoadUI(switchAccount ? "請選擇 Google 帳戶…" : "請在 Google 視窗完成登入…");
+    await loginPromise;
     const nextAccount = accountScopeKey();
-    // 換帳：清掉舊帳左側清單與本機畫面，再載入新帳號雲端專案
     if (prevAccount && nextAccount && prevAccount !== nextAccount) {
       resetWorkspaceForAccountSwitch();
       renderProjectRail();
@@ -7487,7 +7523,6 @@ async function cloudLogin() {
     startCloudWatch();
     hideSyncConflict();
     startBootLoadUI("載入資料中…");
-    // 登入後載入「此帳號」專案清單並切到作用中專案（含雲端進度）
     try {
       await ensureProjectsLoaded();
     } catch (e2) {
@@ -7496,12 +7531,18 @@ async function cloudLogin() {
     }
   } catch (e) {
     console.error(e);
-    toast("登入失敗：" + (e.message || e));
+    const msg = (e && e.message) || String(e || "");
+    if (msg && msg.indexOf("已取消") === -1) toast("登入失敗：" + msg);
   } finally {
+    state.cloudLoginBusy = false;
     stopBootLoadUI();
     render();
   }
 }
+window.lineCloudLogin = function (ev) {
+  try { if (ev && ev.preventDefault) ev.preventDefault(); } catch (e) {}
+  cloudLogin({ switchAccount: false });
+};
 async function cloudPull() {
   try {
     if (!isCloudLoggedIn()) {
@@ -7752,7 +7793,18 @@ document.body.addEventListener("click", ev => {
   if (ev.target.closest("[data-sync-save]")) { cloudPush(); return; }
   if (ev.target.closest("[data-sync-reload]")) { cloudPull(); return; }
   if (ev.target.closest("[data-sync-later]")) { hideSyncConflict(); return; }
-  if (ev.target.closest("[data-cloud-login]")) { cloudLogin(); return; }
+  if (ev.target.closest("[data-boot-cancel]")) {
+    cancelBootOrLogin();
+    return;
+  }
+  if (ev.target.closest("[data-cloud-relogin]")) {
+    cloudLogin({ switchAccount: true });
+    return;
+  }
+  if (ev.target.closest("[data-cloud-login]")) {
+    cloudLogin({ switchAccount: false });
+    return;
+  }
   if (ev.target.closest("[data-cloud-pull]")) { cloudPull(); return; }
   if (ev.target.closest("[data-sheets-reload]")) {
     renderSheetsEmbed();
