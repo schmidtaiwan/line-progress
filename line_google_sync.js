@@ -1536,10 +1536,21 @@
     });
   }
 
-  function requestToken(prompt, hintEmail) {
+  function requestToken(prompt, hintEmail, timeoutMs) {
     return ensureInit().then(function () {
       return new Promise(function (resolve, reject) {
+        let settled = false;
+        const waitMs = Math.max(15000, Number(timeoutMs) || 90000);
+        const timer = setTimeout(function () {
+          if (settled) return;
+          settled = true;
+          try { tokenClient.callback = function () {}; } catch (e) {}
+          reject(new Error("登入逾時或 Google 視窗已關閉／被封鎖，請再按「登入 Google」重試"));
+        }, waitMs);
         tokenClient.callback = function (resp) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
           if (resp.error) {
             reject(new Error(resp.error_description || resp.error));
             return;
@@ -1550,7 +1561,14 @@
         const req = { prompt: prompt || "" };
         // 已登入時帶 hint，避免「從雲端載入」又跳出選帳戶
         if (hintEmail) req.hint = hintEmail;
-        tokenClient.requestAccessToken(req);
+        try {
+          tokenClient.requestAccessToken(req);
+        } catch (e) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          reject(e);
+        }
       });
     });
   }

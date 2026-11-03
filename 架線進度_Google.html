@@ -1846,7 +1846,7 @@
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
 <script src="line_sheets_codec.js?v=71"></script>
-<script src="line_google_sync.js?v=92"></script>
+<script src="line_google_sync.js?v=93"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 let STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1857,7 +1857,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, cloudLoginBusy: false, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1868,7 +1868,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 92;
+const PAGE_BUILD = 93;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -2774,6 +2774,30 @@ async function reorderProjects(fromId, toId) {
   }
 }
 
+function withTimeout(promise, ms, label) {
+  const wait = Math.max(5000, Number(ms) || 60000);
+  const tag = label || "操作";
+  return new Promise(function (resolve, reject) {
+    let settled = false;
+    const timer = setTimeout(function () {
+      if (settled) return;
+      settled = true;
+      reject(new Error(tag + "逾時（" + Math.round(wait / 1000) + " 秒），請重試或檢查網路"));
+    }, wait);
+    Promise.resolve(promise).then(function (v) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(v);
+    }, function (e) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(e);
+    });
+  });
+}
+
 async function ensureProjectsLoaded() {
   if (!window.LineOneDrive || !isCloudLoggedIn()) return;
   if (typeof LineOneDrive.loadProjectsIndex !== "function") return;
@@ -2787,7 +2811,7 @@ async function ensureProjectsLoaded() {
   renderProjectRail();
   try {
     // 專案清單來自「目前登入帳號」的 Drive：架線進度專案/projects_index.json
-    const list = await LineOneDrive.loadProjectsIndex();
+    const list = await withTimeout(LineOneDrive.loadProjectsIndex(), 60000, "載入專案清單");
     // 若載入中途又換帳，丟棄結果
     if (state.cloudAccount && state.cloudAccount !== accountScopeKey()) {
       return;
@@ -2802,7 +2826,11 @@ async function ensureProjectsLoaded() {
     if (remembered === PROJECTS_OVERVIEW_ID) {
       // 先用本機快取畫出總覽（避免 Sheets／逐案遷移卡住登入畫面）
       updateBootLoadPhase("載入專案總覽…");
-      await activateProjectsOverview({ fromCloud: false, skipConfirm: true });
+      await withTimeout(
+        activateProjectsOverview({ fromCloud: false, skipConfirm: true }),
+        45000,
+        "載入專案總覽"
+      );
       // 背景再拉雲端，不擋 boot 結束
       Promise.resolve().then(async () => {
         try {
@@ -2821,7 +2849,11 @@ async function ensureProjectsLoaded() {
       return;
     }
     updateBootLoadPhase("載入專案「" + cur.name + "」…");
-    await activateProject(cur, { skipConfirm: true, fromCloud: true });
+    await withTimeout(
+      activateProject(cur, { skipConfirm: true, fromCloud: true }),
+      90000,
+      "載入專案「" + cur.name + "」"
+    );
     updateBootLoadPhase("載入完成");
   } catch (e) {
     console.warn(e);
@@ -3961,19 +3993,37 @@ function prepareLockedShell() {
 
 function renderBootLoadGate() {
   prepareLockedShell();
+  const logged = isCloudLoggedIn();
   const phase = escapeHtml(state.bootLoadPhase || "載入資料中…");
   const t = formatBootLoadTimer(bootLoadElapsedSec());
+  const title = logged ? "正在載入專案" : "登入進行中";
+  const desc = logged
+    ? "已登入 Google，正在載入雲端專案與進度資料。"
+    : "請在跳出的 Google 視窗完成登入。若沒有跳出視窗，請檢查是否封鎖彈出視窗；也可按「取消」後再登入。";
+  const actions = logged
+    ? cloudBarHtml()
+    : `<div class="cloud-bar" id="cloudBar">
+        <span class="msg">等待 Google 登入視窗回應…</span>
+        <button type="button" class="btn-cloud ghost" data-boot-cancel>✖ 取消</button>
+      </div>`;
   document.getElementById("weekly").innerHTML = `
     <div class="login-gate">
-      <h2>登入後繼續</h2>
-      <p>已登入 Google，正在載入雲端專案與進度資料。</p>
+      <h2>${title}</h2>
+      <p>${desc}</p>
       <div class="boot-load-status" role="status" aria-live="polite">
         <p class="phase" id="bootLoadPhase">${phase}</p>
         <p class="timer" id="bootLoadTimer">${t}</p>
-        <p class="hint">載入資料中，請稍候…</p>
+        <p class="hint">${logged ? "載入資料中，請稍候…" : "完成登入後會自動載入專案"}</p>
       </div>
-      ${cloudBarHtml()}
+      ${actions}
     </div>`;
+}
+
+function cancelBootOrLogin() {
+  state.cloudLoginBusy = false;
+  stopBootLoadUI();
+  toast("已取消，可再按「登入 Google」");
+  render();
 }
 
 function renderLoginGate() {
@@ -7468,6 +7518,11 @@ function patchItemField(itemIdx, field, raw) {
 }
 
 async function cloudLogin() {
+  if (state.cloudLoginBusy) {
+    toast("登入視窗已開啟，請先完成或按取消");
+    return;
+  }
+  state.cloudLoginBusy = true;
   try {
     startBootLoadUI("正在開啟 Google 登入…");
     toast("正在登入…");
@@ -7498,6 +7553,7 @@ async function cloudLogin() {
     console.error(e);
     toast("登入失敗：" + (e.message || e));
   } finally {
+    state.cloudLoginBusy = false;
     stopBootLoadUI();
     render();
   }
@@ -7752,6 +7808,10 @@ document.body.addEventListener("click", ev => {
   if (ev.target.closest("[data-sync-save]")) { cloudPush(); return; }
   if (ev.target.closest("[data-sync-reload]")) { cloudPull(); return; }
   if (ev.target.closest("[data-sync-later]")) { hideSyncConflict(); return; }
+  if (ev.target.closest("[data-boot-cancel]")) {
+    cancelBootOrLogin();
+    return;
+  }
   if (ev.target.closest("[data-cloud-login]")) { cloudLogin(); return; }
   if (ev.target.closest("[data-cloud-pull]")) { cloudPull(); return; }
   if (ev.target.closest("[data-sheets-reload]")) {
