@@ -26,6 +26,9 @@
   /** 本頁面只強制 consent 一次，避免「未驗證應用」警告一直跳 */
   let scopeConsentAsked = false;
   let scopeRetryInFlight = null;
+  /** access token 到期時間（epoch ms）。GIS token 約 1 小時，過期後 Sheets 會回 401 */
+  let tokenExpiresAt = 0;
+  let tokenInflight = null;
   const PRESENCE_TTL_MS = 45000;
   const PRESENCE_INTERVAL_MS = 12000;
   const PRESENCE_PREFIX = "vivo_r01_view_";
@@ -244,6 +247,19 @@
 
   function sheetsFetch(url, options) {
     options = options || {};
+    return getToken(!!options._forceToken).then(function (tok) {
+      return sheetsFetchWithToken(url, options, tok);
+    }).then(function (res) {
+      if (res.status !== 401 || options._authRetried) return res;
+      // 畫面仍顯示已登入，但 token 已失效。清掉後換新的再試一次。
+      state.token = "";
+      tokenExpiresAt = 0;
+      return sheetsFetch(url, Object.assign({}, options, { _authRetried: true, _forceToken: true }));
+    });
+  }
+
+  function sheetsFetchWithToken(url, options, token) {
+    options = options || {};
     const timeoutMs = options.timeoutMs != null ? options.timeoutMs : 20000;
     const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
     let timer = null;
@@ -253,10 +269,12 @@
       }, timeoutMs);
     }
     const headers = Object.assign({}, options.headers || {}, {
-      Authorization: "Bearer " + state.token
+      Authorization: "Bearer " + token
     });
     const opts = Object.assign({}, options, { headers: headers });
     delete opts.timeoutMs;
+    delete opts._authRetried;
+    delete opts._forceToken;
     if (ctrl) opts.signal = ctrl.signal;
     return fetch(url, opts).then(
       function (res) {
@@ -1545,6 +1563,8 @@
             return;
           }
           state.token = resp.access_token;
+          const sec = Number(resp.expires_in) || 3600;
+          tokenExpiresAt = Date.now() + Math.max(60, sec - 90) * 1000;
           resolve(resp.access_token);
         };
         const req = { prompt: prompt || "" };
@@ -1586,6 +1606,7 @@
     const switchAccount = !!opts.switchAccount;
     const prevEmail = accountEmail();
     state.token = "";
+    tokenExpiresAt = 0;
     if (switchAccount) {
       clearAllProjectCaches();
       activeProject = null;
@@ -1616,6 +1637,7 @@
         google.accounts.oauth2.revoke(state.token, function () {});
       }
       state.token = "";
+      tokenExpiresAt = 0;
       state.account = null;
       clearAllProjectCaches();
       activeProject = null;
@@ -1801,20 +1823,44 @@
     });
   }
 
-  function getToken() {
-    if (state.token) return Promise.resolve(state.token);
+  function tokenStillValid() {
+    return !!(state.token && tokenExpiresAt && Date.now() < tokenExpiresAt);
+  }
+
+  function getToken(forceRefresh) {
+    if (!forceRefresh && tokenStillValid()) return Promise.resolve(state.token);
+    if (tokenInflight) return tokenInflight;
+    state.token = "";
+    tokenExpiresAt = 0;
     const hint = accountHint();
-    return requestToken("", hint).then(function (tok) {
+    const run = requestToken("", hint).catch(function () {
+      // 靜默續期失敗（分頁開太久、工作階段過期）才請使用者再選一次帳號
+      return requestToken("select_account", "");
+    }).then(function (tok) {
       if (state.account) return tok;
       return fetchUserEmail(tok).then(function () { return tok; });
     });
+    tokenInflight = run.finally(function () {
+      if (tokenInflight === run) tokenInflight = null;
+    });
+    return tokenInflight;
   }
 
   function driveFetch(url, options) {
-    return getToken().then(function (tok) {
-      const opts = options || {};
-      const headers = Object.assign({ Authorization: "Bearer " + tok }, opts.headers || {});
-      return fetch(url, Object.assign({}, opts, { headers: headers }));
+    options = options || {};
+    return getToken(!!options._forceToken).then(function (tok) {
+      const headers = Object.assign({}, options.headers || {}, {
+        Authorization: "Bearer " + tok
+      });
+      const opts = Object.assign({}, options, { headers: headers });
+      delete opts._authRetried;
+      delete opts._forceToken;
+      return fetch(url, opts);
+    }).then(function (res) {
+      if (res.status !== 401 || options._authRetried) return res;
+      state.token = "";
+      tokenExpiresAt = 0;
+      return driveFetch(url, Object.assign({}, options, { _authRetried: true, _forceToken: true }));
     });
   }
 
