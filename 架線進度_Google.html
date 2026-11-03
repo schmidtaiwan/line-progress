@@ -1011,7 +1011,7 @@
   body.locked header.top .page-ver,
   body.locked header.top .top-right { display: flex !important; }
   body.locked header.top { padding: 10px 28px; min-height: 0; }
-  .btn-photo, .btn-file {
+  .btn-photo {
     border: 1px solid #9ec3e0;
     background: #f0f7fc;
     color: #1d6fa5;
@@ -1022,38 +1022,27 @@
     cursor: pointer;
     white-space: nowrap;
   }
-  .btn-photo:hover, .btn-file:hover { background: #e3f0f9; }
+  .btn-photo:hover { background: #e3f0f9; }
   .btn-photo.has { background: #1d6fa5; color: #fff; border-color: #1d6fa5; }
-  .btn-file {
-    border-color: #b7a4e3; background: #f5f3ff; color: #5b21b6;
-  }
-  .btn-file:hover { background: #ede9fe; }
-  .btn-file.has { background: #6b46c1; color: #fff; border-color: #6b46c1; }
-  .photo-cell, .file-cell { white-space: nowrap; }
-  .attach-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  .photo-gallery, .file-gallery {
+  .photo-cell { white-space: nowrap; }
+  .photo-gallery {
     display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;
   }
-  .photo-chip, .file-chip {
+  .photo-chip {
     display: flex; flex-direction: column; gap: 6px; width: 112px;
     border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: #fff;
   }
-  .file-chip { width: 148px; }
-  .photo-chip a, .file-chip a {
+  .photo-chip a {
     display: block; font-size: 13px; color: #1d6fa5; text-decoration: none;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .file-chip .file-kind {
-    font-size: 11px; font-weight: 700; color: #5b21b6;
   }
   .photo-chip .thumb {
     width: 100%; height: 72px; object-fit: cover; border-radius: 6px; background: #edf2f7;
   }
-  .photo-chip .btn-del, .file-chip .btn-del {
+  .photo-chip .btn-del {
     width: 100%; padding: 4px 6px; font-size: 13px;
   }
-  .photo-input, .file-input { display: none !important; }
-  .stage-rec-form .attach-actions { margin-left: 2px; }
+  .photo-input { display: none !important; }
   .photo-preview-mask {
     position: fixed; inset: 0; z-index: 9999;
     background: rgba(12, 20, 28, 0.72);
@@ -1846,7 +1835,7 @@
 <script src="exceljs.min.js?v=36"></script>
 <script src="export_line_xlsx.js?v=70"></script>
 <script src="line_sheets_codec.js?v=71"></script>
-<script src="line_google_sync.js?v=96"></script>
+<script src="line_google_sync.js?v=91r"></script>
 <script>
 const BASE = JSON.parse(document.getElementById("payload").textContent);
 let STORE_KEY = "vivo_r01_line_dashboard_" + (BASE.source || "default");
@@ -1857,7 +1846,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, cloudLoginBusy: false, projDragId: "", projDragMoved: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1868,11 +1857,10 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 97;
+const PAGE_BUILD = 91;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
-const FILE_ACCEPT = ".txt,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.pdf,.zip,.7z,.rar,.msg,.eml,application/*,text/*";
 const HIERARCHY_SEED_R02 = {
   "arch": "hierarchy",
   "source": "進度表 晶睿TY2 2樓-R02產線電力、CDA及排氣工程20261026R 2.pdf",
@@ -2774,30 +2762,6 @@ async function reorderProjects(fromId, toId) {
   }
 }
 
-function withTimeout(promise, ms, label) {
-  const wait = Math.max(5000, Number(ms) || 60000);
-  const tag = label || "操作";
-  return new Promise(function (resolve, reject) {
-    let settled = false;
-    const timer = setTimeout(function () {
-      if (settled) return;
-      settled = true;
-      reject(new Error(tag + "逾時（" + Math.round(wait / 1000) + " 秒），請重試或檢查網路"));
-    }, wait);
-    Promise.resolve(promise).then(function (v) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(v);
-    }, function (e) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(e);
-    });
-  });
-}
-
 async function ensureProjectsLoaded() {
   if (!window.LineOneDrive || !isCloudLoggedIn()) return;
   if (typeof LineOneDrive.loadProjectsIndex !== "function") return;
@@ -2811,7 +2775,7 @@ async function ensureProjectsLoaded() {
   renderProjectRail();
   try {
     // 專案清單來自「目前登入帳號」的 Drive：架線進度專案/projects_index.json
-    const list = await withTimeout(LineOneDrive.loadProjectsIndex(), 60000, "載入專案清單");
+    const list = await LineOneDrive.loadProjectsIndex();
     // 若載入中途又換帳，丟棄結果
     if (state.cloudAccount && state.cloudAccount !== accountScopeKey()) {
       return;
@@ -2826,11 +2790,7 @@ async function ensureProjectsLoaded() {
     if (remembered === PROJECTS_OVERVIEW_ID) {
       // 先用本機快取畫出總覽（避免 Sheets／逐案遷移卡住登入畫面）
       updateBootLoadPhase("載入專案總覽…");
-      await withTimeout(
-        activateProjectsOverview({ fromCloud: false, skipConfirm: true }),
-        45000,
-        "載入專案總覽"
-      );
+      await activateProjectsOverview({ fromCloud: false, skipConfirm: true });
       // 背景再拉雲端，不擋 boot 結束
       Promise.resolve().then(async () => {
         try {
@@ -2849,11 +2809,7 @@ async function ensureProjectsLoaded() {
       return;
     }
     updateBootLoadPhase("載入專案「" + cur.name + "」…");
-    await withTimeout(
-      activateProject(cur, { skipConfirm: true, fromCloud: true }),
-      90000,
-      "載入專案「" + cur.name + "」"
-    );
+    await activateProject(cur, { skipConfirm: true, fromCloud: true });
     updateBootLoadPhase("載入完成");
   } catch (e) {
     console.warn(e);
@@ -3605,10 +3561,8 @@ function ensureStageRecords() {
   while (DATA.stageRecords.length < n) DATA.stageRecords.push({ logs: [] });
   if (DATA.stageRecords.length > n) DATA.stageRecords = DATA.stageRecords.slice(0, n);
   DATA.stageRecords = DATA.stageRecords.map(function (rec) {
-    if (!rec || typeof rec !== "object") return { logs: [], photos: [], files: [] };
+    if (!rec || typeof rec !== "object") return { logs: [] };
     if (!Array.isArray(rec.logs)) rec.logs = [];
-    if (!Array.isArray(rec.photos)) rec.photos = [];
-    if (!Array.isArray(rec.files)) rec.files = [];
     return rec;
   });
   return DATA.stageRecords;
@@ -3617,39 +3571,7 @@ function ensureStageRecords() {
 function stageRecordCount(si) {
   ensureStageRecords();
   const rec = DATA.stageRecords[si];
-  if (!rec) return 0;
-  return (rec.logs || []).length + (rec.photos || []).length + (rec.files || []).length;
-}
-
-function fileKindLabel(meta) {
-  const mime = String((meta && meta.mimeType) || "").toLowerCase();
-  const name = String((meta && (meta.originalName || meta.name)) || "").toLowerCase();
-  if (mime.indexOf("image/") === 0 || /\.(png|jpe?g|gif|webp|bmp)$/i.test(name)) return "照片";
-  if (/\.pdf$/i.test(name) || mime.indexOf("pdf") >= 0) return "PDF";
-  if (/\.docx?$/i.test(name) || mime.indexOf("word") >= 0) return "Word";
-  if (/\.pptx?$/i.test(name) || mime.indexOf("presentation") >= 0) return "PPT";
-  if (/\.xlsx?$/i.test(name) || /\.csv$/i.test(name) || mime.indexOf("sheet") >= 0 || mime.indexOf("excel") >= 0) return "Excel";
-  if (/\.txt$/i.test(name) || mime.indexOf("text/") === 0) return "TXT";
-  return "檔案";
-}
-
-function attachListHtml(list, opts) {
-  opts = opts || {};
-  const items = Array.isArray(list) ? list : [];
-  if (!items.length) return "";
-  const delAttr = opts.delAttr || "data-del-file";
-  const delKey = opts.delKey || "";
-  const kindMode = opts.kindMode || "file";
-  return `<div class="${kindMode === "photo" ? "photo-gallery" : "file-gallery"}">${items.map(function (p, pi) {
-    const href = (p && p.webViewLink) || (p && p.id ? ("https://drive.google.com/file/d/" + p.id + "/view") : "#");
-    const name = escapeHtml((p && (p.originalName || p.name)) || ((kindMode === "photo" ? "照片" : "檔案") + (pi + 1)));
-    const kind = escapeHtml(fileKindLabel(p));
-    return `<div class="${kindMode === "photo" ? "photo-chip" : "file-chip"}">
-      ${kindMode === "file" ? `<div class="file-kind">${kind}</div>` : ""}
-      <a href="${escapeAttr(href)}" target="_blank" rel="noopener" title="${name}">${name}</a>
-      <button type="button" class="btn-del" ${delAttr}="${escapeAttr(delKey)}" data-attach-i="${pi}">刪除</button>
-    </div>`;
-  }).join("")}</div>`;
+  return rec && Array.isArray(rec.logs) ? rec.logs.length : 0;
 }
 
 function toggleStageRecord(si) {
@@ -3664,16 +3586,13 @@ function stageRecordEditorHtml(si) {
   ensureStageRecords();
   const stage = (DATA.stages || [])[si] || {};
   const name = stage.name || stage.mark || ("階段" + (si + 1));
-  const rec = DATA.stageRecords[si];
-  const logs = (rec.logs || []).slice().reverse();
-  const photos = rec.photos || [];
-  const files = rec.files || [];
+  const logs = (DATA.stageRecords[si].logs || []).slice().reverse();
   const kindOpts = STAGE_REC_KINDS.map(function (k) {
     return `<option value="${escapeAttr(k)}">${escapeHtml(k)}</option>`;
   }).join("");
   const list = logs.length
     ? `<ul class="stage-rec-list">${logs.map(function (e, revI) {
-        const realIdx = (rec.logs.length - 1) - revI;
+        const realIdx = (DATA.stageRecords[si].logs.length - 1) - revI;
         const kind = e.kind || "重要事項";
         const kindCls = "stage-rec-kind k-" + String(kind).replace(/\s+/g, "");
         return `<li>
@@ -3687,34 +3606,18 @@ function stageRecordEditorHtml(si) {
           <button type="button" class="btn-del icon-only" data-del-stage-rec="${si}" data-stage-rec-i="${realIdx}" title="刪除此筆記錄" aria-label="刪除記錄">🗑</button>
         </li>`;
       }).join("")}</ul>`
-    : `<p class="note" style="margin:0">尚無文字記錄。可登記此階段的重要事項、各設備共同事項或會議記錄。</p>`;
-  const photoGal = photos.length
-    ? attachListHtml(photos, { delAttr: "data-del-stage-photo", delKey: String(si), kindMode: "photo" })
-    : `<p class="note" style="margin:0">尚無照片</p>`;
-  const fileGal = files.length
-    ? attachListHtml(files, { delAttr: "data-del-stage-file", delKey: String(si), kindMode: "file" })
-    : `<p class="note" style="margin:0">尚無檔案（可上傳 TXT／Word／PPT／Excel／PDF／其它）</p>`;
+    : `<p class="note" style="margin:0">尚無記錄。可登記此階段的重要事項、各設備共同事項或會議記錄。</p>`;
   return `<div class="stage-rec-box" data-stage-rec-box="${si}">
     <div class="stage-rec-title">📋 ${escapeHtml(name)}｜階段總記錄</div>
-    <p class="note" style="margin:0 0 8px">跨設備共用：重要事項、共同事項、會議記錄與附件。寫入本機後請按「儲存」同步雲端。</p>
+    <p class="note" style="margin:0 0 8px">跨設備共用：重要事項、共同事項、會議記錄。寫入本機後請按「儲存」同步雲端。</p>
     <label>記錄類型</label>
     <div class="stage-rec-form">
       <select data-stage-rec-kind="${si}">${kindOpts}</select>
       <button type="button" class="btn-cloud" data-stage-rec-submit="${si}">新增記錄</button>
       <button type="button" class="btn-cloud ghost" data-stage-rec-close="${si}">收合</button>
-      <span class="attach-actions">
-        <button type="button" class="btn-photo ${photos.length ? "has" : ""}" data-upload-stage-photo="${si}" title="上傳照片">📷 上傳照片${photos.length ? " " + photos.length : ""}</button>
-        <input class="photo-input" type="file" accept="image/*" multiple data-stage-photo-file="${si}">
-        <button type="button" class="btn-file ${files.length ? "has" : ""}" data-upload-stage-file="${si}" title="上傳 TXT／Word／PPT／Excel／PDF／其它檔案">📎 上傳檔案${files.length ? " " + files.length : ""}</button>
-        <input class="file-input" type="file" accept="${FILE_ACCEPT}" multiple data-stage-file-file="${si}">
-      </span>
     </div>
     <label>內容</label>
     <textarea data-stage-rec-text="${si}" rows="3" placeholder="例如：Kick-off 會議決議、各設備共用介面規格、風險與待辦…"></textarea>
-    <label>照片（${photos.length}）</label>
-    ${photoGal}
-    <label>檔案（${files.length}）</label>
-    ${fileGal}
     <label>歷史（${logs.length}）</label>
     ${list}
   </div>`;
@@ -3868,15 +3771,14 @@ function railIconBtn(attrs, ico, label, extraClass) {
 function railCloudHtml() {
   const logged = isCloudLoggedIn();
   if (!logged) {
-    // onclick 直連，保留使用者手勢，避免 Google 彈窗被擋
-    return `<button type="button" class="rail-icon-btn" title="登入 Google" onclick="window.lineCloudLogin && window.lineCloudLogin(event)"><span class="ico">🔑</span><span class="lbl">登入 Google</span></button>`;
+    return railIconBtn('data-cloud-login title="登入 Google"', "🔑", "登入 Google");
   }
   const n = (window.LineOneDrive && LineOneDrive.state && LineOneDrive.state.viewers) || 0;
   return `
     <span class="rail-icon-btn viewer" id="viewerBadge" title="同一 Google 帳號在不同裝置／分頁登入會分別計算">
       <span class="ico">👁</span><span class="lbl">連線查看：${n} 個</span>
     </span>
-    ${railIconBtn('data-cloud-relogin title="重新登入／換帳"', "🔄", "重新登入")}
+    ${railIconBtn('data-cloud-login title="重新登入／換帳"', "🔄", "重新登入")}
     ${railIconBtn('data-cloud-pull title="從雲端載入目前專案"', "☁", "從雲端載入")}
     ${railIconBtn('data-cloud-logout title="登出"', "🚪", "登出", "danger")}
   `;
@@ -3897,7 +3799,7 @@ function cloudBarHtml() {
   if (!logged) {
     return `<div class="cloud-bar" id="cloudBar">
       <span class="msg">${msg}</span>
-      <button type="button" class="btn-cloud" id="btnGoogleLogin" onclick="window.lineCloudLogin && window.lineCloudLogin(event)">🔑 登入 Google</button>
+      <button type="button" class="btn-cloud" data-cloud-login>🔑 登入 Google</button>
     </div>`;
   }
   return `<div class="cloud-bar" id="cloudBar">
@@ -3911,7 +3813,7 @@ function updateCloudBar() {
   if (!el || !window.LineOneDrive) return;
   const logged = isCloudLoggedIn();
   const hasSave = !!el.querySelector("[data-cloud-push]");
-  const hasLogin = !!el.querySelector("[data-cloud-login], #btnGoogleLogin");
+  const hasLogin = !!el.querySelector("[data-cloud-login]");
   if ((!logged && hasSave) || (logged && !hasSave) || (!logged && !hasLogin) || (logged && hasLogin)) {
     el.outerHTML = cloudBarHtml();
     return;
@@ -3950,8 +3852,7 @@ function startBootLoadUI(phase) {
   state.bootLoadPhase = phase || "載入資料中…";
   if (!state.bootLoadStartedAt) state.bootLoadStartedAt = Date.now();
   if (state.bootLoadTimer) clearInterval(state.bootLoadTimer);
-  // 1s 更新一次即可，避免登入彈窗期間過度佔用主執行緒
-  state.bootLoadTimer = setInterval(updateBootLoadTimerDom, 1000);
+  state.bootLoadTimer = setInterval(updateBootLoadTimerDom, 250);
   renderBootLoadGate();
 }
 
@@ -3995,42 +3896,19 @@ function prepareLockedShell() {
 
 function renderBootLoadGate() {
   prepareLockedShell();
-  const logged = isCloudLoggedIn();
   const phase = escapeHtml(state.bootLoadPhase || "載入資料中…");
   const t = formatBootLoadTimer(bootLoadElapsedSec());
-  const title = logged ? "正在載入專案" : "登入進行中";
-  const desc = logged
-    ? "已登入 Google，正在載入雲端專案與進度資料。"
-    : "請在跳出的 Google 視窗完成登入。若沒有跳出視窗，請檢查是否封鎖彈出視窗；也可按「取消」後再登入。";
-  const actions = logged
-    ? cloudBarHtml()
-    : `<div class="cloud-bar" id="cloudBar">
-        <span class="msg">等待 Google 登入視窗回應…</span>
-        <button type="button" class="btn-cloud ghost" data-boot-cancel>✖ 取消</button>
-      </div>`;
   document.getElementById("weekly").innerHTML = `
     <div class="login-gate">
-      <h2>${title}</h2>
-      <p>${desc}</p>
+      <h2>登入後繼續</h2>
+      <p>已登入 Google，正在載入雲端專案與進度資料。</p>
       <div class="boot-load-status" role="status" aria-live="polite">
         <p class="phase" id="bootLoadPhase">${phase}</p>
         <p class="timer" id="bootLoadTimer">${t}</p>
-        <p class="hint">${logged ? "載入資料中，請稍候…" : "完成登入後會自動載入專案"}</p>
+        <p class="hint">載入資料中，請稍候…</p>
       </div>
-      ${actions}
+      ${cloudBarHtml()}
     </div>`;
-}
-
-function cancelBootOrLogin() {
-  state.cloudLoginBusy = false;
-  try {
-    if (window.LineOneDrive && typeof LineOneDrive.cancelPendingLogin === "function") {
-      LineOneDrive.cancelPendingLogin("已取消登入");
-    }
-  } catch (e) {}
-  stopBootLoadUI();
-  toast("已取消，可再按「登入 Google」");
-  render();
 }
 
 function renderLoginGate() {
@@ -5515,23 +5393,18 @@ function submitItemProgress(itemIdx, workRaw, pctRaw) {
   }
   toast(statusMsg ? ("已記錄進度更新；" + statusMsg) : "已記錄進度更新");
 }
-function itemFiles(it) {
-  return Array.isArray(it && it.files) ? it.files : [];
-}
-function ensureItemFiles(it) {
-  if (!it) return [];
-  if (!Array.isArray(it.files)) it.files = [];
-  return it.files;
-}
 function photoGalleryHtml(it, idx) {
   const photos = itemPhotos(it);
   if (!photos.length) return "";
-  return attachListHtml(photos, { delAttr: "data-del-photo", delKey: String(idx), kindMode: "photo" });
-}
-function fileGalleryHtml(it, idx) {
-  const files = itemFiles(it);
-  if (!files.length) return "";
-  return attachListHtml(files, { delAttr: "data-del-file", delKey: String(idx), kindMode: "file" });
+  const chips = photos.map((p, pi) => {
+    const href = (p && p.webViewLink) || (p && p.id ? ("https://drive.google.com/file/d/" + p.id + "/view") : "#");
+    const name = escapeHtml((p && p.name) || ("照片" + (pi + 1)));
+    return `<div class="photo-chip">
+      <a href="${escapeAttr(href)}" target="_blank" rel="noopener">${name}</a>
+      <button type="button" class="btn-del" data-del-photo="${idx}" data-photo-i="${pi}">刪除照片</button>
+    </div>`;
+  }).join("");
+  return `<div class="photo-gallery" data-photo-gallery="${idx}">${chips}</div>`;
 }
 function photoBtnHtml(it, idx) {
   const n = itemPhotos(it).length;
@@ -5545,18 +5418,6 @@ function photoBtnHtml(it, idx) {
     <button type="button" class="${cls}" data-upload-photo="${idx}" title="${escapeAttr(tip)}">${label}</button>
     <input class="photo-input" type="file" accept="image/*" multiple data-photo-file="${idx}">
   </div>`;
-}
-function fileBtnHtml(it, idx) {
-  const n = itemFiles(it).length;
-  const cls = "btn-file" + (n ? " has" : "");
-  const label = n ? ("檔案 " + n) : "上傳檔案";
-  return `<div class="file-cell">
-    <button type="button" class="${cls}" data-upload-file="${idx}" title="上傳 TXT／Word／PPT／Excel／PDF／其它檔案">${label}</button>
-    <input class="file-input" type="file" accept="${FILE_ACCEPT}" multiple data-item-file="${idx}">
-  </div>`;
-}
-function attachBtnsHtml(it, idx) {
-  return `<div class="attach-actions">${photoBtnHtml(it, idx)}${fileBtnHtml(it, idx)}</div>`;
 }
 
 function closePhotoPreview() {
@@ -5739,7 +5600,7 @@ function buildItemsDetailHtml(eq) {
         </div>
       </td>
       <td><select class="s-${it.status}" data-field="status">${optionHtml(STATUS_OPTS, it.status || "未開始")}</select></td>
-      <td>${attachBtnsHtml(it, idx)}</td>
+      <td>${photoBtnHtml(it, idx)}</td>
       <td>
         <button type="button" class="btn-prog" data-open-prog="${idx}" title="登記今日進度">今日進度</button>
         <button type="button" class="btn-del icon-only" data-del-item="${idx}" title="刪除項目" aria-label="刪除項目">🗑</button>
@@ -5755,8 +5616,6 @@ function buildItemsDetailHtml(eq) {
           <textarea data-field="note" data-item-idx="${idx}" placeholder="固定備註說明…">${escapeHtml(it.note || "")}</textarea>
           <label>雲端照片</label>
           ${photoGalleryHtml(it, idx) || '<p class="note" style="margin:0">尚無照片，按「上傳照片」新增</p>'}
-          <label>雲端檔案</label>
-          ${fileGalleryHtml(it, idx) || '<p class="note" style="margin:0">尚無檔案，按「上傳檔案」新增（TXT／Word／PPT／Excel／其它）</p>'}
         </div>
       </td>
     </tr>`;
@@ -5778,7 +5637,7 @@ function buildItemsDetailHtml(eq) {
         </div>
       </div></div>
       <div class="m-field"><label>狀態</label><select class="s-${it.status}" data-field="status">${optionHtml(STATUS_OPTS, it.status || "未開始")}</select></div>
-      <div class="m-field"><label>附件</label>${attachBtnsHtml(it, idx)}</div>
+      <div class="m-field"><label>照片</label>${photoBtnHtml(it, idx)}</div>
       <div class="m-field"><button type="button" class="btn-prog" data-open-prog="${idx}">📝 今日進度</button></div>
       <div class="remark-box ${open ? "" : "hidden"}" data-remark-for="${idx}">
         ${progressLogHtml(it, idx)}
@@ -5788,8 +5647,6 @@ function buildItemsDetailHtml(eq) {
         <textarea data-field="note" data-item-idx="${idx}" placeholder="固定備註說明…">${escapeHtml(it.note || "")}</textarea>
         <label>雲端照片</label>
         ${photoGalleryHtml(it, idx) || '<p class="note" style="margin:0">尚無照片</p>'}
-        <label>雲端檔案</label>
-        ${fileGalleryHtml(it, idx) || '<p class="note" style="margin:0">尚無檔案</p>'}
       </div>
       <button type="button" class="btn-del icon-only" data-del-item="${idx}" title="刪除項目" aria-label="刪除項目">🗑</button>
     </article>`;
@@ -5815,7 +5672,7 @@ function buildItemsDetailHtml(eq) {
         <div class="desktop-table"><table class="edit-table">
           <thead><tr>
             <th style="min-width:220px">待完成事項</th><th>完成率</th><th></th>
-            <th>急迫性</th><th>預計完成</th><th>狀態</th><th>附件</th><th></th>
+            <th>急迫性</th><th>預計完成</th><th>狀態</th><th>照片</th><th></th>
           </tr></thead>
           <tbody>${itemRows}</tbody>
         </table></div>
@@ -7524,28 +7381,13 @@ function patchItemField(itemIdx, field, raw) {
   }
 }
 
-async function cloudLogin(opts) {
-  opts = opts || {};
-  if (state.cloudLoginBusy) {
-    toast("登入視窗已開啟，請先完成或按取消");
-    return;
-  }
-  if (!window.LineOneDrive) {
-    toast("雲端模組未載入，請重新整理");
-    return;
-  }
-  state.cloudLoginBusy = true;
-  const prevAccount = state.cloudAccount || "";
+async function cloudLogin() {
   try {
-    // 重要：requestAccessToken 必須在點擊的同步堆疊內觸發。
-    // 不可先 await／重繪（startBootLoadUI），否則瀏覽器會封鎖 Google 彈窗。
-    // 首次登入不要強制 select_account；重新登入／換帳才強制選帳戶
-    const switchAccount = opts.switchAccount === true;
-    toast(switchAccount ? "請選擇 Google 帳戶…" : "正在登入 Google…");
-    const loginPromise = LineOneDrive.login({ switchAccount: switchAccount });
-    // 彈窗請求已送出後，再顯示等待畫面
-    startBootLoadUI(switchAccount ? "請選擇 Google 帳戶…" : "請在 Google 視窗完成登入…");
-    await loginPromise;
+    startBootLoadUI("正在開啟 Google 登入…");
+    toast("正在登入…");
+    const prevAccount = state.cloudAccount || "";
+    // 已登入時按「重新登入」才跳出選帳戶；首次登入也可選帳
+    await LineOneDrive.login({ switchAccount: true });
     const nextAccount = accountScopeKey();
     // 換帳：清掉舊帳左側清單與本機畫面，再載入新帳號雲端專案
     if (prevAccount && nextAccount && prevAccount !== nextAccount) {
@@ -7568,19 +7410,12 @@ async function cloudLogin(opts) {
     }
   } catch (e) {
     console.error(e);
-    const msg = (e && e.message) || String(e || "");
-    if (msg && msg.indexOf("已取消") === -1) toast("登入失敗：" + msg);
+    toast("登入失敗：" + (e.message || e));
   } finally {
-    state.cloudLoginBusy = false;
     stopBootLoadUI();
     render();
   }
 }
-// 給登入按鈕 onclick 直連（保留使用者手勢，避免彈窗被擋）
-window.lineCloudLogin = function (ev) {
-  try { if (ev && ev.preventDefault) ev.preventDefault(); } catch (e) {}
-  cloudLogin({ switchAccount: false });
-};
 async function cloudPull() {
   try {
     if (!isCloudLoggedIn()) {
@@ -7831,18 +7666,7 @@ document.body.addEventListener("click", ev => {
   if (ev.target.closest("[data-sync-save]")) { cloudPush(); return; }
   if (ev.target.closest("[data-sync-reload]")) { cloudPull(); return; }
   if (ev.target.closest("[data-sync-later]")) { hideSyncConflict(); return; }
-  if (ev.target.closest("[data-boot-cancel]")) {
-    cancelBootOrLogin();
-    return;
-  }
-  if (ev.target.closest("[data-cloud-relogin]")) {
-    cloudLogin({ switchAccount: true });
-    return;
-  }
-  if (ev.target.closest("[data-cloud-login]")) {
-    cloudLogin({ switchAccount: false });
-    return;
-  }
+  if (ev.target.closest("[data-cloud-login]")) { cloudLogin(); return; }
   if (ev.target.closest("[data-cloud-pull]")) { cloudPull(); return; }
   if (ev.target.closest("[data-sheets-reload]")) {
     renderSheetsEmbed();
@@ -8312,26 +8136,10 @@ document.body.addEventListener("click", ev => {
     closePhotoPreview();
     return;
   }
-  const uploadStagePhotoBtn = ev.target.closest("[data-upload-stage-photo]");
-  if (uploadStagePhotoBtn) {
-    const si = uploadStagePhotoBtn.dataset.uploadStagePhoto;
-    const wrap = uploadStagePhotoBtn.closest(".attach-actions") || uploadStagePhotoBtn.parentElement;
-    const input = (wrap && wrap.querySelector("[data-stage-photo-file]")) || document.querySelector(`[data-stage-photo-file="${si}"]`);
-    if (input) { input.removeAttribute("capture"); input.click(); }
-    return;
-  }
-  const uploadStageFileBtn = ev.target.closest("[data-upload-stage-file]");
-  if (uploadStageFileBtn) {
-    const si = uploadStageFileBtn.dataset.uploadStageFile;
-    const wrap = uploadStageFileBtn.closest(".attach-actions") || uploadStageFileBtn.parentElement;
-    const input = (wrap && wrap.querySelector("[data-stage-file-file]")) || document.querySelector(`[data-stage-file-file="${si}"]`);
-    if (input) input.click();
-    return;
-  }
   const uploadPhotoBtn = ev.target.closest("[data-upload-photo]");
   if (uploadPhotoBtn) {
     const idx = Number(uploadPhotoBtn.dataset.uploadPhoto);
-    const wrap = uploadPhotoBtn.closest(".photo-cell, .attach-actions") || uploadPhotoBtn.parentElement;
+    const wrap = uploadPhotoBtn.closest(".photo-cell") || uploadPhotoBtn.parentElement;
     const input = (wrap && wrap.querySelector("[data-photo-file]")) || document.querySelector(`[data-photo-file="${idx}"]`);
     if (input) {
       // 確保不帶 capture，手機可選相簿／檔案
@@ -8340,73 +8148,28 @@ document.body.addEventListener("click", ev => {
     }
     return;
   }
-  const uploadFileBtn = ev.target.closest("[data-upload-file]");
-  if (uploadFileBtn) {
-    const idx = Number(uploadFileBtn.dataset.uploadFile);
-    const wrap = uploadFileBtn.closest(".file-cell, .attach-actions") || uploadFileBtn.parentElement;
-    const input = (wrap && wrap.querySelector("[data-item-file]")) || document.querySelector(`[data-item-file="${idx}"]`);
-    if (input) input.click();
-    return;
-  }
-  function removeDriveAttach(list, ai, label, after) {
-    if (!Array.isArray(list) || !list[ai]) return;
-    const meta = list[ai];
-    if (!confirm("確定刪除" + label + "？\n" + ((meta.originalName || meta.name) || ""))) return;
+  const delPhoto = ev.target.closest("[data-del-photo]");
+  if (delPhoto) {
+    const idx = Number(delPhoto.dataset.delPhoto);
+    const pi = Number(delPhoto.dataset.photoI);
+    const it = DATA.equipment[state.eq].stages[state.stage].items[idx];
+    if (!it || !Array.isArray(it.photos) || !it.photos[pi]) return;
+    const photo = it.photos[pi];
+    if (!confirm("確定刪除此照片？\n" + (photo.name || ""))) return;
     const finish = () => {
-      list.splice(ai, 1);
-      saveLocal("已刪除" + label);
-      if (typeof after === "function") after();
-      else render();
+      it.photos.splice(pi, 1);
+      saveLocal("已刪除照片");
+      render();
     };
-    if (window.LineOneDrive && meta.id && isCloudLoggedIn()) {
-      toast("正在刪除雲端" + label + "…");
-      LineOneDrive.deleteDriveFile(meta.id).then(finish).catch(e => {
+    if (window.LineOneDrive && photo.id && isCloudLoggedIn()) {
+      toast("正在刪除雲端照片…");
+      LineOneDrive.deleteDriveFile(photo.id).then(finish).catch(e => {
         console.warn(e);
         if (confirm("雲端刪除失敗，仍從清單移除？\n" + (e.message || e))) finish();
       });
     } else {
       finish();
     }
-  }
-  const delStagePhoto = ev.target.closest("[data-del-stage-photo]");
-  if (delStagePhoto) {
-    ensureStageRecords();
-    const si = Number(delStagePhoto.dataset.delStagePhoto);
-    const ai = Number(delStagePhoto.dataset.attachI);
-    const rec = DATA.stageRecords[si];
-    if (!rec) return;
-    state.stageRecordOpen = si;
-    removeDriveAttach(rec.photos, ai, "照片", function () { renderItems(); });
-    return;
-  }
-  const delStageFile = ev.target.closest("[data-del-stage-file]");
-  if (delStageFile) {
-    ensureStageRecords();
-    const si = Number(delStageFile.dataset.delStageFile);
-    const ai = Number(delStageFile.dataset.attachI);
-    const rec = DATA.stageRecords[si];
-    if (!rec) return;
-    state.stageRecordOpen = si;
-    removeDriveAttach(rec.files, ai, "檔案", function () { renderItems(); });
-    return;
-  }
-  const delPhoto = ev.target.closest("[data-del-photo]");
-  if (delPhoto) {
-    const idx = Number(delPhoto.dataset.delPhoto);
-    const pi = Number(delPhoto.dataset.attachI != null ? delPhoto.dataset.attachI : delPhoto.dataset.photoI);
-    const it = DATA.equipment[state.eq].stages[state.stage].items[idx];
-    if (!it || !Array.isArray(it.photos)) return;
-    removeDriveAttach(it.photos, pi, "照片");
-    return;
-  }
-  const delFile = ev.target.closest("[data-del-file]");
-  if (delFile) {
-    const idx = Number(delFile.dataset.delFile);
-    const fi = Number(delFile.dataset.attachI);
-    const it = DATA.equipment[state.eq].stages[state.stage].items[idx];
-    if (!it) return;
-    ensureItemFiles(it);
-    removeDriveAttach(it.files, fi, "檔案");
     return;
   }
 
@@ -8690,110 +8453,6 @@ document.body.addEventListener("change", async (ev) => {
     }
     return;
   }
-  async function persistAfterUpload(okMsg, softFailMsg) {
-    saveLocal(okMsg);
-    try {
-      await LineOneDrive.uploadJson(cloudPayload());
-      state.dirty = false;
-      updateCloudBar();
-    } catch (e2) {
-      console.warn(e2);
-      toast(softFailMsg || (okMsg + "，但進度儲存失敗，請再按「儲存」"));
-    }
-  }
-
-  const stagePhotoInput = ev.target.closest("[data-stage-photo-file]");
-  if (stagePhotoInput) {
-    const si = Number(stagePhotoInput.dataset.stagePhotoFile);
-    const files = stagePhotoInput.files ? Array.from(stagePhotoInput.files) : [];
-    stagePhotoInput.value = "";
-    if (!files.length) return;
-    if (!window.LineOneDrive || !isCloudLoggedIn()) { toast("請先登入 Google"); return; }
-    ensureStageRecords();
-    const rec = DATA.stageRecords[si];
-    if (!rec) return;
-    const stageName = ((DATA.stages || [])[si] && DATA.stages[si].name) || ("stage" + si);
-    try {
-      toast("正在上傳照片（" + files.length + "）…");
-      if (!Array.isArray(rec.photos)) rec.photos = [];
-      const label = "stage_" + String(stageName).slice(0, 20);
-      for (const file of files) {
-        const meta = await LineOneDrive.uploadPhoto(file, label);
-        rec.photos.push(meta);
-      }
-      state.stageRecordOpen = si;
-      await persistAfterUpload("階段照片已上傳", "照片已上傳，但進度儲存失敗，請再按「儲存」");
-      renderItems();
-      toast("已上傳 " + files.length + " 張照片到雲端");
-    } catch (e) {
-      console.error(e);
-      toast("上傳失敗：" + (e.message || e));
-    }
-    return;
-  }
-
-  const stageFileInput = ev.target.closest("[data-stage-file-file]");
-  if (stageFileInput) {
-    const si = Number(stageFileInput.dataset.stageFileFile);
-    const files = stageFileInput.files ? Array.from(stageFileInput.files) : [];
-    stageFileInput.value = "";
-    if (!files.length) return;
-    if (!window.LineOneDrive || !isCloudLoggedIn()) { toast("請先登入 Google"); return; }
-    if (!window.LineOneDrive.uploadFile) { toast("雲端模組尚未支援檔案上傳，請強制重新整理"); return; }
-    ensureStageRecords();
-    const rec = DATA.stageRecords[si];
-    if (!rec) return;
-    const stageName = ((DATA.stages || [])[si] && DATA.stages[si].name) || ("stage" + si);
-    try {
-      toast("正在上傳檔案（" + files.length + "）…");
-      if (!Array.isArray(rec.files)) rec.files = [];
-      const label = "stage_" + String(stageName).slice(0, 20);
-      for (const file of files) {
-        const meta = await LineOneDrive.uploadFile(file, label);
-        rec.files.push(meta);
-      }
-      state.stageRecordOpen = si;
-      await persistAfterUpload("階段檔案已上傳", "檔案已上傳，但進度儲存失敗，請再按「儲存」");
-      renderItems();
-      toast("已上傳 " + files.length + " 個檔案到雲端");
-    } catch (e) {
-      console.error(e);
-      toast("上傳失敗：" + (e.message || e));
-    }
-    return;
-  }
-
-  const itemFileInput = ev.target.closest("[data-item-file]");
-  if (itemFileInput) {
-    const idx = Number(itemFileInput.dataset.itemFile);
-    const files = itemFileInput.files ? Array.from(itemFileInput.files) : [];
-    itemFileInput.value = "";
-    if (!files.length) return;
-    if (!window.LineOneDrive || !isCloudLoggedIn()) { toast("請先登入 Google"); return; }
-    if (!window.LineOneDrive.uploadFile) { toast("雲端模組尚未支援檔案上傳，請強制重新整理"); return; }
-    const eq = DATA.equipment[state.eq];
-    const it = eq && eq.stages[state.stage] && eq.stages[state.stage].items[idx];
-    if (!it) return;
-    try {
-      toast("正在上傳檔案（" + files.length + "）…");
-      ensureItemFiles(it);
-      const label = (eq.idx || "") + "_" + String(it.item || "item").slice(0, 20);
-      for (const file of files) {
-        const meta = await LineOneDrive.uploadFile(file, label);
-        it.files.push(meta);
-      }
-      state.openRemark = idx;
-      state.itemsExpand = true;
-      await persistAfterUpload("檔案已上傳", "檔案已上傳，但進度儲存失敗，請再按「儲存」");
-      render();
-      toast("已上傳 " + files.length + " 個檔案到雲端");
-    } catch (e) {
-      console.error(e);
-      toast("上傳失敗：" + (e.message || e));
-    }
-    return;
-  }
-
   const photoInput = ev.target.closest("[data-photo-file]");
   if (!photoInput) return;
   const idx = Number(photoInput.dataset.photoFile);
@@ -8815,7 +8474,15 @@ document.body.addEventListener("change", async (ev) => {
       const meta = await LineOneDrive.uploadPhoto(file, label);
       it.photos.push(meta);
     }
-    await persistAfterUpload("照片已上傳", "照片已上傳，但進度儲存失敗，請再按「儲存」");
+    saveLocal("照片已上傳");
+    try {
+      await LineOneDrive.uploadJson(cloudPayload());
+      state.dirty = false;
+      updateCloudBar();
+    } catch (e2) {
+      console.warn(e2);
+      toast("照片已上傳，但進度儲存失敗，請再按「儲存」");
+    }
     render();
     toast("已上傳 " + files.length + " 張照片到雲端");
   } catch (e) {
