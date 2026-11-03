@@ -1536,40 +1536,53 @@
     });
   }
 
-  function requestToken(prompt, hintEmail, timeoutMs) {
-    return ensureInit().then(function () {
-      return new Promise(function (resolve, reject) {
-        let settled = false;
-        const waitMs = Math.max(15000, Number(timeoutMs) || 90000);
-        const timer = setTimeout(function () {
-          if (settled) return;
-          settled = true;
-          try { tokenClient.callback = function () {}; } catch (e) {}
-          reject(new Error("登入逾時或 Google 視窗已關閉／被封鎖，請再按「登入 Google」重試"));
-        }, waitMs);
-        tokenClient.callback = function (resp) {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          if (resp.error) {
-            reject(new Error(resp.error_description || resp.error));
-            return;
-          }
-          state.token = resp.access_token;
-          resolve(resp.access_token);
-        };
-        const req = { prompt: prompt || "" };
-        // 已登入時帶 hint，避免「從雲端載入」又跳出選帳戶
-        if (hintEmail) req.hint = hintEmail;
-        try {
-          tokenClient.requestAccessToken(req);
-        } catch (e) {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          reject(e);
+  /** 必須在使用者點擊的同步呼叫堆疊內執行 requestAccessToken，否則瀏覽器會封鎖彈窗 */
+  function requestTokenSync(prompt, hintEmail, timeoutMs) {
+    if (!tokenClient || !state.ready) {
+      return Promise.reject(new Error("Google 登入尚未就緒，請再按一次「登入 Google」"));
+    }
+    return new Promise(function (resolve, reject) {
+      let settled = false;
+      const waitMs = Math.max(15000, Number(timeoutMs) || 90000);
+      const timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        try { tokenClient.callback = function () {}; } catch (e) {}
+        reject(new Error("登入逾時或 Google 視窗已關閉／被封鎖，請再按「登入 Google」重試"));
+      }, waitMs);
+      tokenClient.callback = function (resp) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (resp.error) {
+          reject(new Error(resp.error_description || resp.error));
+          return;
         }
-      });
+        state.token = resp.access_token;
+        resolve(resp.access_token);
+      };
+      const req = { prompt: prompt || "" };
+      // 已登入時帶 hint，避免「從雲端載入」又跳出選帳戶
+      if (hintEmail) req.hint = hintEmail;
+      try {
+        tokenClient.requestAccessToken(req);
+      } catch (e) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(e);
+      }
+    });
+  }
+
+  function requestToken(prompt, hintEmail, timeoutMs) {
+    // 已就緒：同步開啟彈窗（保留 click user gesture）
+    if (state.ready && tokenClient) {
+      return requestTokenSync(prompt, hintEmail, timeoutMs);
+    }
+    // 尚未就緒：先載入 GIS，請使用者再點一次（await 後再開彈窗會被擋）
+    return ensureInit().then(function () {
+      return Promise.reject(new Error("Google 元件剛就緒，請再按一次「登入 Google」以開啟視窗"));
     });
   }
 
