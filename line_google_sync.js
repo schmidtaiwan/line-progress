@@ -18,8 +18,6 @@
     viewerList: []
   };
   let tokenClient = null;
-  /** 進行中的 token 請求（error_callback／取消／逾時用來結束 Promise） */
-  let pendingToken = null;
   let uploadTimer = null;
   let cachedFolderId = "";
   let presenceTimer = null;
@@ -1522,21 +1520,6 @@
 
   function initMsal() { return ensureInit(); }
 
-  function settlePendingToken(fn) {
-    const pending = pendingToken;
-    pendingToken = null;
-    if (!pending || pending.settled) return;
-    pending.settled = true;
-    if (pending.timer) clearTimeout(pending.timer);
-    fn(pending);
-  }
-
-  function cancelPendingLogin(message) {
-    settlePendingToken(function (pending) {
-      pending.reject(new Error(message || "已取消登入"));
-    });
-  }
-
   function ensureInit() {
     const id = (cfg.clientId || "").trim();
     if (!id || id.indexOf("PLEASE_") === 0) {
@@ -1547,75 +1530,28 @@
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: id,
         scope: SCOPES,
-        callback: function (resp) {
-          settlePendingToken(function (pending) {
-            if (resp && resp.error) {
-              pending.reject(new Error(resp.error_description || resp.error));
-              return;
-            }
-            state.token = (resp && resp.access_token) || "";
-            pending.resolve(state.token);
-          });
-        },
-        error_callback: function (err) {
-          settlePendingToken(function (pending) {
-            const typ = (err && err.type) || "";
-            let msg = "Google 登入失敗，請再試一次";
-            if (typ === "popup_failed_to_open") {
-              msg = "無法開啟 Google 登入視窗（可能被瀏覽器封鎖）。請允許彈出式視窗後再按登入";
-            } else if (typ === "popup_closed") {
-              msg = "已關閉 Google 登入視窗，請再按「登入 Google」";
-            } else if (err && (err.message || err.type)) {
-              msg = "Google 登入失敗：" + (err.message || err.type);
-            }
-            pending.reject(new Error(msg));
-          });
-        }
+        callback: function () {}
       });
       state.ready = true;
     });
   }
 
-  /** 已就緒時必須同步呼叫 requestAccessToken，保留 click 手勢 */
-  function requestTokenSync(prompt, hintEmail, timeoutMs) {
-    if (!tokenClient || !state.ready) {
-      return Promise.reject(new Error("Google 登入尚未就緒，請再按一次「登入 Google」"));
-    }
-    return new Promise(function (resolve, reject) {
-      if (pendingToken && !pendingToken.settled) {
-        settlePendingToken(function (pending) {
-          pending.reject(new Error("已取消前一次登入，請再試一次"));
-        });
-      }
-      const waitMs = Math.max(12000, Number(timeoutMs) || 90000);
-      const pending = { settled: false, timer: null, resolve: resolve, reject: reject };
-      pending.timer = setTimeout(function () {
-        if (pending.settled) return;
-        pending.settled = true;
-        if (pendingToken === pending) pendingToken = null;
-        reject(new Error("登入逾時。若沒看到 Google 視窗，請允許彈出式視窗後再試"));
-      }, waitMs);
-      pendingToken = pending;
-      const req = { prompt: prompt || "" };
-      if (hintEmail) req.hint = hintEmail;
-      try {
-        tokenClient.requestAccessToken(req);
-      } catch (e) {
-        if (pending.settled) return;
-        pending.settled = true;
-        clearTimeout(pending.timer);
-        if (pendingToken === pending) pendingToken = null;
-        reject(e);
-      }
-    });
-  }
-
-  function requestToken(prompt, hintEmail, timeoutMs) {
-    if (state.ready && tokenClient) {
-      return requestTokenSync(prompt, hintEmail, timeoutMs);
-    }
+  function requestToken(prompt, hintEmail) {
     return ensureInit().then(function () {
-      return Promise.reject(new Error("Google 元件剛就緒，請再按一次「登入 Google」以開啟視窗"));
+      return new Promise(function (resolve, reject) {
+        tokenClient.callback = function (resp) {
+          if (resp.error) {
+            reject(new Error(resp.error_description || resp.error));
+            return;
+          }
+          state.token = resp.access_token;
+          resolve(resp.access_token);
+        };
+        const req = { prompt: prompt || "" };
+        // 已登入時帶 hint，避免「從雲端載入」又跳出選帳戶
+        if (hintEmail) req.hint = hintEmail;
+        tokenClient.requestAccessToken(req);
+      });
     });
   }
 
@@ -2451,13 +2387,9 @@
     return (cfg.photosFolder || "photos").trim() || "photos";
   }
 
-  function filesFolderName() {
-    return (cfg.filesFolder || "files").trim() || "files";
-  }
-
-  function ensureNamedChildFolder(folderName) {
+  function ensurePhotosFolderId() {
     return ensureFolderId().then(function (parentId) {
-      const name = String(folderName || "files").trim() || "files";
+      const name = photosFolderName();
       return findChildFolder(parentId === "root" ? "root" : parentId, name).then(function (id) {
         if (id) return id;
         return createChildFolder(parentId === "root" ? "root" : parentId, name);
@@ -2465,60 +2397,35 @@
     });
   }
 
-  function ensurePhotosFolderId() {
-    return ensureNamedChildFolder(photosFolderName());
-  }
-
-  function ensureFilesFolderId() {
-    return ensureNamedChildFolder(filesFolderName());
-  }
-
   function sanitizeFileName(name) {
-    const raw = String(name || "file.bin").replace(/[\\/:*?"<>|]/g, "_").trim();
-    return raw || "file.bin";
+    const raw = String(name || "photo.jpg").replace(/[\\/:*?"<>|]/g, "_").trim();
+    return raw || "photo.jpg";
   }
 
-  function guessMimeType(file, fallback) {
-    const mime = (file && file.type) || "";
-    if (mime) return mime;
-    const n = String((file && file.name) || "").toLowerCase();
-    if (/\.png$/i.test(n)) return "image/png";
-    if (/\.jpe?g$/i.test(n)) return "image/jpeg";
-    if (/\.gif$/i.test(n)) return "image/gif";
-    if (/\.webp$/i.test(n)) return "image/webp";
-    if (/\.txt$/i.test(n)) return "text/plain";
-    if (/\.csv$/i.test(n)) return "text/csv";
-    if (/\.pdf$/i.test(n)) return "application/pdf";
-    if (/\.docx?$/i.test(n)) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    if (/\.pptx?$/i.test(n)) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-    if (/\.xlsx?$/i.test(n)) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-    return fallback || "application/octet-stream";
-  }
-
-  /** 上傳任意檔到專案資料夾下指定子資料夾，回傳 { id, name, mimeType, uploadedAt, webViewLink, kind } */
-  function uploadDriveBlob(file, label, opts) {
-    opts = opts || {};
+  /** 上傳圖片到 LineProcess/photos，回傳 { id, name, mimeType, uploadedAt } */
+  function uploadPhoto(file, label) {
     if (!file) return Promise.reject(new Error("未選擇檔案"));
-    const folderPromise = opts.folder === "photos" ? ensurePhotosFolderId() : ensureFilesFolderId();
-    const mime = guessMimeType(file, opts.fallbackMime || "application/octet-stream");
-    const base = sanitizeFileName(file.name || (opts.defaultName || "file.bin"));
+    const mime = file.type || "image/jpeg";
+    if (mime && mime.indexOf("image/") !== 0 && mime !== "application/octet-stream") {
+      return Promise.reject(new Error("請選擇圖片檔"));
+    }
+    const base = sanitizeFileName(file.name || "photo.jpg");
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const prefix = label ? String(label).replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 40) + "_" : "";
     const name = prefix + stamp + "_" + base;
-    const errLabel = opts.errLabel || "上傳檔案";
     return ensureInit()
       .then(function () {
         if (!state.account) return login();
       })
       .then(function () {
         return withScopeRetry(function () {
-          return folderPromise.then(function (folderId) {
+          return ensurePhotosFolderId().then(function (folderId) {
             const meta = {
               name: name,
-              mimeType: mime,
+              mimeType: mime.indexOf("image/") === 0 ? mime : "image/jpeg",
               parents: [folderId]
             };
-            const boundary = "----linefile" + String(Date.now()) + Math.random().toString(16).slice(2);
+            const boundary = "----linephoto" + String(Date.now()) + Math.random().toString(16).slice(2);
             return file.arrayBuffer().then(function (buf) {
               const metaPart =
                 "--" + boundary + "\r\n" +
@@ -2542,7 +2449,7 @@
                   body: body
                 }
               ).then(function (res) {
-                if (!res.ok) return res.text().then(function (t) { throw new Error(errLabel + "失敗 " + res.status + " " + t); });
+                if (!res.ok) return res.text().then(function (t) { throw new Error("上傳照片失敗 " + res.status + " " + t); });
                 return res.json();
               }).then(function (f) {
                 return {
@@ -2550,42 +2457,13 @@
                   name: f.name || name,
                   mimeType: f.mimeType || meta.mimeType,
                   uploadedAt: new Date().toISOString(),
-                  webViewLink: f.webViewLink || ("https://drive.google.com/file/d/" + f.id + "/view"),
-                  kind: opts.kind || "file",
-                  originalName: file.name || base
+                  webViewLink: f.webViewLink || ("https://drive.google.com/file/d/" + f.id + "/view")
                 };
               });
             });
           });
         });
       });
-  }
-
-  /** 上傳圖片到專案 photos 資料夾 */
-  function uploadPhoto(file, label) {
-    if (!file) return Promise.reject(new Error("未選擇檔案"));
-    const mime = guessMimeType(file, "image/jpeg");
-    if (mime.indexOf("image/") !== 0 && mime !== "application/octet-stream") {
-      return Promise.reject(new Error("請選擇圖片檔"));
-    }
-    return uploadDriveBlob(file, label, {
-      folder: "photos",
-      kind: "photo",
-      fallbackMime: "image/jpeg",
-      defaultName: "photo.jpg",
-      errLabel: "上傳照片"
-    });
-  }
-
-  /** 上傳一般檔案（TXT／Word／PPT／Excel／其它）到專案 files 資料夾 */
-  function uploadFile(file, label) {
-    return uploadDriveBlob(file, label, {
-      folder: "files",
-      kind: "file",
-      fallbackMime: "application/octet-stream",
-      defaultName: "file.bin",
-      errLabel: "上傳檔案"
-    });
   }
 
   function deleteDriveFile(fileId) {
@@ -2766,7 +2644,6 @@
     initMsal: initMsal,
     ensureInit: ensureInit,
     login: login,
-    cancelPendingLogin: cancelPendingLogin,
     logout: logout,
     accountEmail: accountEmail,
     isSharedProjectsRoot: isSharedProjectsRoot,
@@ -2777,7 +2654,6 @@
     uploadJson: uploadJson,
     scheduleUpload: scheduleUpload,
     uploadPhoto: uploadPhoto,
-    uploadFile: uploadFile,
     deleteDriveFile: deleteDriveFile,
     photoViewUrl: photoViewUrl,
     downloadFileBlob: downloadFileBlob,
