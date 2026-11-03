@@ -1868,7 +1868,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 96;
+const PAGE_BUILD = 97;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -3868,7 +3868,8 @@ function railIconBtn(attrs, ico, label, extraClass) {
 function railCloudHtml() {
   const logged = isCloudLoggedIn();
   if (!logged) {
-    return railIconBtn('data-cloud-login title="登入 Google"', "🔑", "登入 Google");
+    // onclick 直連，保留使用者手勢，避免 Google 彈窗被擋
+    return `<button type="button" class="rail-icon-btn" title="登入 Google" onclick="window.lineCloudLogin && window.lineCloudLogin(event)"><span class="ico">🔑</span><span class="lbl">登入 Google</span></button>`;
   }
   const n = (window.LineOneDrive && LineOneDrive.state && LineOneDrive.state.viewers) || 0;
   return `
@@ -3896,7 +3897,7 @@ function cloudBarHtml() {
   if (!logged) {
     return `<div class="cloud-bar" id="cloudBar">
       <span class="msg">${msg}</span>
-      <button type="button" class="btn-cloud" data-cloud-login>🔑 登入 Google</button>
+      <button type="button" class="btn-cloud" id="btnGoogleLogin" onclick="window.lineCloudLogin && window.lineCloudLogin(event)">🔑 登入 Google</button>
     </div>`;
   }
   return `<div class="cloud-bar" id="cloudBar">
@@ -3910,7 +3911,7 @@ function updateCloudBar() {
   if (!el || !window.LineOneDrive) return;
   const logged = isCloudLoggedIn();
   const hasSave = !!el.querySelector("[data-cloud-push]");
-  const hasLogin = !!el.querySelector("[data-cloud-login]");
+  const hasLogin = !!el.querySelector("[data-cloud-login], #btnGoogleLogin");
   if ((!logged && hasSave) || (logged && !hasSave) || (!logged && !hasLogin) || (logged && hasLogin)) {
     el.outerHTML = cloudBarHtml();
     return;
@@ -4022,6 +4023,11 @@ function renderBootLoadGate() {
 
 function cancelBootOrLogin() {
   state.cloudLoginBusy = false;
+  try {
+    if (window.LineOneDrive && typeof LineOneDrive.cancelPendingLogin === "function") {
+      LineOneDrive.cancelPendingLogin("已取消登入");
+    }
+  } catch (e) {}
   stopBootLoadUI();
   toast("已取消，可再按「登入 Google」");
   render();
@@ -7518,14 +7524,28 @@ function patchItemField(itemIdx, field, raw) {
   }
 }
 
-async function cloudLogin() {
-  // 還原版次 91 可用流程（v93～v95 的登入改寫會造成卡住／頁面無回應）
+async function cloudLogin(opts) {
+  opts = opts || {};
+  if (state.cloudLoginBusy) {
+    toast("登入視窗已開啟，請先完成或按取消");
+    return;
+  }
+  if (!window.LineOneDrive) {
+    toast("雲端模組未載入，請重新整理");
+    return;
+  }
+  state.cloudLoginBusy = true;
+  const prevAccount = state.cloudAccount || "";
   try {
-    startBootLoadUI("正在開啟 Google 登入…");
-    toast("正在登入…");
-    const prevAccount = state.cloudAccount || "";
-    // 已登入時按「重新登入」才跳出選帳戶；首次登入也可選帳
-    await LineOneDrive.login({ switchAccount: true });
+    // 重要：requestAccessToken 必須在點擊的同步堆疊內觸發。
+    // 不可先 await／重繪（startBootLoadUI），否則瀏覽器會封鎖 Google 彈窗。
+    // 首次登入不要強制 select_account；重新登入／換帳才強制選帳戶
+    const switchAccount = opts.switchAccount === true;
+    toast(switchAccount ? "請選擇 Google 帳戶…" : "正在登入 Google…");
+    const loginPromise = LineOneDrive.login({ switchAccount: switchAccount });
+    // 彈窗請求已送出後，再顯示等待畫面
+    startBootLoadUI(switchAccount ? "請選擇 Google 帳戶…" : "請在 Google 視窗完成登入…");
+    await loginPromise;
     const nextAccount = accountScopeKey();
     // 換帳：清掉舊帳左側清單與本機畫面，再載入新帳號雲端專案
     if (prevAccount && nextAccount && prevAccount !== nextAccount) {
@@ -7548,13 +7568,19 @@ async function cloudLogin() {
     }
   } catch (e) {
     console.error(e);
-    toast("登入失敗：" + (e.message || e));
+    const msg = (e && e.message) || String(e || "");
+    if (msg && msg.indexOf("已取消") === -1) toast("登入失敗：" + msg);
   } finally {
     state.cloudLoginBusy = false;
     stopBootLoadUI();
     render();
   }
 }
+// 給登入按鈕 onclick 直連（保留使用者手勢，避免彈窗被擋）
+window.lineCloudLogin = function (ev) {
+  try { if (ev && ev.preventDefault) ev.preventDefault(); } catch (e) {}
+  cloudLogin({ switchAccount: false });
+};
 async function cloudPull() {
   try {
     if (!isCloudLoggedIn()) {
@@ -7809,8 +7835,12 @@ document.body.addEventListener("click", ev => {
     cancelBootOrLogin();
     return;
   }
-  if (ev.target.closest("[data-cloud-relogin]") || ev.target.closest("[data-cloud-login]")) {
-    cloudLogin();
+  if (ev.target.closest("[data-cloud-relogin]")) {
+    cloudLogin({ switchAccount: true });
+    return;
+  }
+  if (ev.target.closest("[data-cloud-login]")) {
+    cloudLogin({ switchAccount: false });
     return;
   }
   if (ev.target.closest("[data-cloud-pull]")) { cloudPull(); return; }
