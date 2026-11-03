@@ -680,7 +680,15 @@
     background: #fff; border: 1px solid var(--line); border-radius: 8px;
     padding: 8px 10px; margin-bottom: 6px; display: grid;
     grid-template-columns: 1fr auto; gap: 8px; align-items: start;
+    cursor: context-menu;
   }
+  .date-ctx-menu .ctx-label {
+    display: block; padding: 8px 12px 4px; font-size: 12px;
+    color: var(--muted); font-weight: 650; cursor: default;
+  }
+  .date-ctx-menu button.ctx-back { color: #475569; font-size: 13px; }
+  .date-ctx-menu button.ctx-hint { color: #0f766e; font-weight: 650; }
+  #stageRecCtxMenu { max-height: min(70vh, 440px); overflow: auto; min-width: 220px; }
   .stage-rec-meta { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
   .stage-rec-kind {
     display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px;
@@ -1048,9 +1056,6 @@
     border-color: #b42318;
     animation: voice-pulse 1.2s ease-in-out infinite;
   }
-  @keyframes voice-pulse {
-    50% { box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.28); }
-  }
   .btn-voice-act {
     border: 1px solid #e7b3a8;
     background: #fff;
@@ -1067,6 +1072,9 @@
     display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px;
   }
   .stage-rec-content-head label { margin: 0; }
+  @keyframes voice-pulse {
+    50% { box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.28); }
+  }
   .photo-cell, .file-cell { white-space: nowrap; }
   .attach-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .photo-gallery, .file-gallery {
@@ -1860,6 +1868,7 @@
   <button type="button" data-proj-ctx="paste">貼上為新專案</button>
   <button type="button" data-proj-ctx="delete">刪除專案</button>
 </div>
+<div class="date-ctx-menu" id="stageRecCtxMenu" role="menu"></div>
 <div class="photo-preview-mask" id="photoPreviewMask" role="dialog" aria-modal="true" aria-label="照片預覽">
   <div class="photo-preview-box">
     <div class="photo-preview-head">
@@ -1895,7 +1904,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, stageRecCtx: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1906,7 +1915,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 107;
+const PAGE_BUILD = 108;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -3611,10 +3620,11 @@ function ensureStageRecords() {
   while (DATA.stageRecords.length < n) DATA.stageRecords.push({ logs: [] });
   if (DATA.stageRecords.length > n) DATA.stageRecords = DATA.stageRecords.slice(0, n);
   DATA.stageRecords = DATA.stageRecords.map(function (rec) {
-    if (!rec || typeof rec !== "object") return { logs: [], photos: [], files: [] };
+    if (!rec || typeof rec !== "object") return { logs: [], photos: [], files: [], voices: [] };
     if (!Array.isArray(rec.logs)) rec.logs = [];
     if (!Array.isArray(rec.photos)) rec.photos = [];
     if (!Array.isArray(rec.files)) rec.files = [];
+    if (!Array.isArray(rec.voices)) rec.voices = [];
     return rec;
   });
   return DATA.stageRecords;
@@ -3624,12 +3634,13 @@ function stageRecordCount(si) {
   ensureStageRecords();
   const rec = DATA.stageRecords[si];
   if (!rec) return 0;
-  return (rec.logs || []).length + (rec.photos || []).length + (rec.files || []).length;
+  return (rec.logs || []).length + (rec.photos || []).length + (rec.files || []).length + (rec.voices || []).length;
 }
 
 function fileKindLabel(meta) {
   const mime = String((meta && meta.mimeType) || "").toLowerCase();
   const name = String((meta && (meta.originalName || meta.name)) || "").toLowerCase();
+  if (mime.indexOf("audio/") === 0 || (meta && meta.kind === "voice") || /\.(webm|m4a|mp3|wav|ogg)$/i.test(name)) return "語音";
   if (mime.indexOf("image/") === 0 || /\.(png|jpe?g|gif|webp|bmp)$/i.test(name)) return "照片";
   if (/\.pdf$/i.test(name) || mime.indexOf("pdf") >= 0) return "PDF";
   if (/\.docx?$/i.test(name) || mime.indexOf("word") >= 0) return "Word";
@@ -3682,7 +3693,7 @@ function stageRecordEditorHtml(si) {
         const realIdx = (rec.logs.length - 1) - revI;
         const kind = e.kind || "重要事項";
         const kindCls = "stage-rec-kind k-" + String(kind).replace(/\s+/g, "");
-        return `<li>
+        return `<li data-stage-rec-log="${si}" data-stage-rec-i="${realIdx}" title="右鍵可新增到設備待完成事項">
           <div>
             <div class="stage-rec-meta">
               <span class="${kindCls}">${escapeHtml(kind)}</span>
@@ -3714,7 +3725,7 @@ function stageRecordEditorHtml(si) {
         <input class="photo-input" type="file" accept="image/*" multiple data-stage-photo-file="${si}">
         <button type="button" class="btn-file ${files.length ? "has" : ""}" data-upload-stage-file="${si}" title="上傳 TXT／Word／PPT／Excel／PDF／其它檔案">📎 上傳檔案${files.length ? " " + files.length : ""}</button>
         <input class="file-input" type="file" accept="${FILE_ACCEPT}" multiple data-stage-file-file="${si}">
-        <button type="button" class="btn-voice" data-stage-rec-voice="${si}" title="錄音並轉成文字，填入下方內容">🎤 語音記錄</button>
+        <button type="button" class="btn-voice" data-stage-rec-voice="${si}" title="錄音並存成音檔">🎤 語音記錄</button>
         <select class="voice-lang" data-stage-rec-voice-lang="${si}" title="辨識語言" aria-label="辨識語言">
           <option value="zh-TW">繁中</option>
           <option value="en-US">英文</option>
@@ -6646,6 +6657,7 @@ function showProjCtxMenu(x, y, projId) {
   if (!menu) return;
   hideEqCtxMenu();
   hideDateCtxMenu();
+  hideStageRecCtxMenu();
   state.projCtxTarget = projId || null;
   const clip = readProjectClipboard();
   const pasteBtn = menu.querySelector('[data-proj-ctx="paste"]');
@@ -6694,6 +6706,156 @@ function hideEqCtxMenu() {
   if (menu) menu.classList.remove("show");
   state.eqCtxTarget = null;
 }
+
+
+function hideStageRecCtxMenu() {
+  const menu = document.getElementById("stageRecCtxMenu");
+  if (menu) {
+    menu.classList.remove("show");
+    menu.innerHTML = "";
+  }
+  state.stageRecCtx = null;
+}
+
+function eqDisplayLabel(eq) {
+  if (!eq) return "設備";
+  return ((eq.idx != null && eq.idx !== "" ? eq.idx + " " : "") + (eq.name || "設備")).trim();
+}
+
+function stageDisplayName(si) {
+  const st = (DATA.stages || [])[si] || {};
+  return st.name || st.mark || ("階段" + (si + 1));
+}
+
+function fillStageRecCtxMenu() {
+  const menu = document.getElementById("stageRecCtxMenu");
+  const ctx = state.stageRecCtx;
+  if (!menu || !ctx) return;
+  const preview = String(ctx.text || "").replace(/\s+/g, " ").trim();
+  const short = preview.length > 36 ? preview.slice(0, 36) + "…" : preview;
+  let html = "";
+  if (ctx.mode === "stage") {
+    const eq = DATA.equipment[ctx.pickEq];
+    html += `<span class="ctx-label">選階段｜${escapeHtml(eqDisplayLabel(eq))}</span>`;
+    if (short) html += `<span class="ctx-label" style="font-weight:500;padding-top:0">${escapeHtml(short)}</span>`;
+    html += `<button type="button" class="ctx-back" data-stage-rec-ctx="back">← 重選設備</button>`;
+    (DATA.stages || []).forEach(function (st, si) {
+      const on = eq ? isStageOn(eq, si) : true;
+      const mark = si === ctx.srcSi ? "（目前紀錄階段）" : "";
+      const off = on ? "" : "（未勾選）";
+      html += `<button type="button" data-stage-rec-ctx="add" data-eq="${ctx.pickEq}" data-stage="${si}">${escapeHtml(stageDisplayName(si))}${mark}${off}</button>`;
+    });
+  } else {
+    html += `<span class="ctx-label">新增到待完成事項｜選設備</span>`;
+    if (short) html += `<span class="ctx-label" style="font-weight:500;padding-top:0">${escapeHtml(short)}</span>`;
+    const cur = DATA.equipment[state.eq];
+    if (cur) {
+      html += `<button type="button" class="ctx-hint" data-stage-rec-ctx="quick" data-eq="${state.eq}" data-stage="${ctx.srcSi}">目前設備「${escapeHtml(eqDisplayLabel(cur))}」｜${escapeHtml(stageDisplayName(ctx.srcSi))}</button>`;
+    }
+    (DATA.equipment || []).forEach(function (eq, ei) {
+      html += `<button type="button" data-stage-rec-ctx="pick-eq" data-eq="${ei}">${escapeHtml(eqDisplayLabel(eq))}…</button>`;
+    });
+    if (!(DATA.equipment || []).length) {
+      html += `<button type="button" disabled>尚無設備</button>`;
+    }
+  }
+  menu.innerHTML = html;
+}
+
+function showStageRecCtxMenu(x, y, si, logI) {
+  ensureStageRecords();
+  const rec = DATA.stageRecords[si];
+  if (!rec || !rec.logs || !rec.logs[logI]) return;
+  hideDateCtxMenu();
+  hideEqCtxMenu();
+  hideProjCtxMenu();
+  const entry = rec.logs[logI];
+  state.stageRecCtx = {
+    srcSi: si,
+    logI: logI,
+    text: String(entry.text || "").trim(),
+    kind: entry.kind || "",
+    mode: "eq",
+    pickEq: null,
+    x: x,
+    y: y
+  };
+  fillStageRecCtxMenu();
+  positionCtxMenu(document.getElementById("stageRecCtxMenu"), x, y);
+}
+
+function addStageRecAsTodo(eqIdx, stageSi, text, kind) {
+  const eq = DATA.equipment[eqIdx];
+  if (!eq) {
+    toast("找不到目標設備");
+    return false;
+  }
+  if (!Array.isArray(eq.stages)) eq.stages = defaultStagesFrom(eq);
+  while (eq.stages.length <= stageSi) {
+    eq.stages.push({ items: [], due: "" });
+  }
+  ensureStageOn(eq);
+  eq.stageOn[stageSi] = true;
+  if (!eq.stages[stageSi]) eq.stages[stageSi] = { items: [], due: "" };
+  if (!Array.isArray(eq.stages[stageSi].items)) eq.stages[stageSi].items = [];
+  const items = eq.stages[stageSi].items;
+  const n = items.length + 1;
+  const raw = String(text || "").replace(/\s+/g, " ").trim() || "新項目";
+  const title = String(n).padStart(2, "0") + ". " + raw.slice(0, 120);
+  items.push({
+    item: title,
+    pct: 0,
+    urg: "中",
+    start: "",
+    due: items[0] && items[0].due ? items[0].due : "",
+    actual: "",
+    status: "未開始",
+    note: kind ? ("來源：" + kind) : "",
+    photos: [],
+    progressLog: []
+  });
+  syncStageDue(eq, stageSi);
+  state.eq = eqIdx;
+  state.stage = stageSi;
+  state.tab = "items";
+  state.onlyHigh = false;
+  state.openRemark = items.length - 1;
+  state.openDates = null;
+  state.stageRecordOpen = null;
+  hideStageRecCtxMenu();
+  saveLocal("已從階段紀錄新增待完成事項");
+  render();
+  toast("已新增到「" + eqDisplayLabel(eq) + "｜" + stageDisplayName(stageSi) + "」");
+  return true;
+}
+
+function runStageRecCtxAction(kind, btn) {
+  const ctx = state.stageRecCtx;
+  if (!ctx) return;
+  if (kind === "back") {
+    ctx.mode = "eq";
+    ctx.pickEq = null;
+    fillStageRecCtxMenu();
+    positionCtxMenu(document.getElementById("stageRecCtxMenu"), ctx.x, ctx.y);
+    return;
+  }
+  if (kind === "pick-eq") {
+    const ei = Number(btn.dataset.eq);
+    if (!Number.isFinite(ei) || !DATA.equipment[ei]) return;
+    ctx.mode = "stage";
+    ctx.pickEq = ei;
+    fillStageRecCtxMenu();
+    positionCtxMenu(document.getElementById("stageRecCtxMenu"), ctx.x, ctx.y);
+    return;
+  }
+  if (kind === "quick" || kind === "add") {
+    const ei = Number(btn.dataset.eq);
+    const si = Number(btn.dataset.stage);
+    if (!Number.isFinite(ei) || !Number.isFinite(si)) return;
+    addStageRecAsTodo(ei, si, ctx.text, ctx.kind);
+  }
+}
+
 
 function readEqClipboard() {
   if (state.eqClipboard && state.eqClipboard.name != null) return state.eqClipboard;
@@ -6748,6 +6910,7 @@ function showEqCtxMenu(x, y, eqIdx) {
   const menu = document.getElementById("eqCtxMenu");
   if (!menu || !Number.isFinite(eqIdx) || !DATA.equipment[eqIdx]) return;
   hideDateCtxMenu();
+  hideStageRecCtxMenu();
   state.eqCtxTarget = eqIdx;
   const clip = readEqClipboard();
   const pasteBtn = menu.querySelector('[data-eq-ctx="paste"]');
@@ -6984,6 +7147,7 @@ function ensureItemDatesOpen(input) {
 function showDateCtxMenu(x, y, input) {
   const menu = document.getElementById("dateCtxMenu");
   if (!menu || !input) return;
+  hideStageRecCtxMenu();
   state.dateCtxTarget = input;
   const hasClip = !!readDateClipboard();
   const hasVal = !!normalizeDateValue(input.value);
@@ -8572,6 +8736,20 @@ document.body.addEventListener("dblclick", ev => {
 });
 
 document.body.addEventListener("contextmenu", ev => {
+  const stageRecHit = ev.target.closest("[data-stage-rec-log]");
+  if (stageRecHit && !ev.target.closest("[data-del-stage-rec]")) {
+    const si = Number(stageRecHit.dataset.stageRecLog);
+    const logI = Number(stageRecHit.dataset.stageRecI);
+    if (Number.isFinite(si) && Number.isFinite(logI)) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      hideEqCtxMenu();
+      hideDateCtxMenu();
+      hideProjCtxMenu();
+      showStageRecCtxMenu(ev.clientX, ev.clientY, si, logI);
+      return;
+    }
+  }
   const projHit = ev.target.closest("[data-project-id]");
   if (projHit) {
     ev.preventDefault();
@@ -8669,6 +8847,13 @@ document.body.addEventListener("contextmenu", ev => {
 
 // 用 mousedown 執行選單，避免 click 前被關閉導致貼上失效
 document.body.addEventListener("mousedown", ev => {
+  const stageRecAct = ev.target.closest("[data-stage-rec-ctx]");
+  if (stageRecAct) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    runStageRecCtxAction(stageRecAct.dataset.stageRecCtx, stageRecAct);
+    return;
+  }
   const act = ev.target.closest("[data-date-ctx]");
   if (act) {
     ev.preventDefault();
@@ -8701,6 +8886,8 @@ document.body.addEventListener("mousedown", ev => {
   }
   const onEqUi = ev.target.closest("#eqCtxMenu");
   if (!onEqUi) hideEqCtxMenu();
+  const onStageRecUi = ev.target.closest("#stageRecCtxMenu, [data-stage-rec-log]");
+  if (!onStageRecUi) hideStageRecCtxMenu();
 }, true);
 
 document.addEventListener("keydown", ev => {
