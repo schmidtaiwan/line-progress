@@ -1,0 +1,17 @@
+---
+description: After changing this GitHub Pages site, push to origin main
+alwaysApply: true
+---
+
+# Auto-push GitHub Pages
+
+This folder is the deploy root for `schmidtaiwan/line-progress`.
+
+When a change to this site is finished, push it in the same turn. Do not stop after local edits and wait for a separate「推上去」.
+
+1. Bump `PAGE_BUILD` in `index.html` (and `架線進度_Google.html` when that copy exists). Set `PAGE_DATE` to today if it is not already.
+2. Commit only the files for this change.
+3. `git push origin main`. Normal push only. Do not force-push unless the user asks.
+4. Tell the user the live URL: https://schmidtaiwan.github.io/line-progress/ and that they should Ctrl+F5.
+
+Do not commit progress JSON, `__pycache__`, scratch scripts, or secrets. `google_config.js` Client ID may stay in the repo (public SPA client).

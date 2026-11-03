@@ -1029,6 +1029,28 @@
   }
   .btn-file:hover { background: #ede9fe; }
   .btn-file.has { background: #6b46c1; color: #fff; border-color: #6b46c1; }
+  .btn-voice, .voice-lang {
+    border: 1px solid #e7b3a8;
+    background: #fff5f3;
+    color: #9f2d20;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .voice-lang { padding: 6px 4px; }
+  .btn-voice:hover, .voice-lang:hover { background: #ffe8e3; }
+  .btn-voice.is-rec {
+    background: #b42318;
+    color: #fff;
+    border-color: #b42318;
+    animation: voice-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes voice-pulse {
+    50% { box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.28); }
+  }
   .photo-cell, .file-cell { white-space: nowrap; }
   .attach-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .photo-gallery, .file-gallery {
@@ -1868,7 +1890,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 103;
+const PAGE_BUILD = 104;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -3675,6 +3697,11 @@ function stageRecordEditorHtml(si) {
         <input class="photo-input" type="file" accept="image/*" multiple data-stage-photo-file="${si}">
         <button type="button" class="btn-file ${files.length ? "has" : ""}" data-upload-stage-file="${si}" title="上傳 TXT／Word／PPT／Excel／PDF／其它檔案">📎 上傳檔案${files.length ? " " + files.length : ""}</button>
         <input class="file-input" type="file" accept="${FILE_ACCEPT}" multiple data-stage-file-file="${si}">
+        <button type="button" class="btn-voice" data-stage-rec-voice="${si}" title="錄音並轉成文字，填入下方內容">🎤 語音記錄</button>
+        <select class="voice-lang" data-stage-rec-voice-lang="${si}" title="辨識語言" aria-label="辨識語言">
+          <option value="zh-TW">繁中</option>
+          <option value="en-US">英文</option>
+        </select>
       </span>
     </div>
     <label>內容</label>
@@ -3713,6 +3740,113 @@ function buildStageRecordsMatrixRows(colN) {
     </tr>`;
   }
   return html;
+}
+
+let stageVoiceRec = null;
+let stageVoiceSi = null;
+
+function stageVoiceButton(si) {
+  return document.querySelector('[data-stage-rec-voice="' + si + '"]');
+}
+
+function stopStageVoice() {
+  const rec = stageVoiceRec;
+  stageVoiceRec = null;
+  stageVoiceSi = null;
+  if (rec) {
+    try { rec.onend = null; rec.onresult = null; rec.onerror = null; } catch (e) {}
+    try { rec.stop(); } catch (e2) {}
+  }
+  document.querySelectorAll("[data-stage-rec-voice].is-rec").forEach(function (btn) {
+    btn.classList.remove("is-rec");
+    btn.textContent = "🎤 語音記錄";
+  });
+  document.querySelectorAll("[data-stage-rec-voice-lang]").forEach(function (sel) {
+    sel.disabled = false;
+  });
+}
+
+function appendStageVoiceText(si, text) {
+  const ta = document.querySelector('[data-stage-rec-text="' + si + '"]');
+  if (!ta) return;
+  const chunk = String(text || "").replace(/\s+/g, " ").trim();
+  if (!chunk) return;
+  const cur = ta.value || "";
+  if (!cur.trim()) ta.value = chunk;
+  else if (/\s$/.test(cur)) ta.value = cur + chunk;
+  else ta.value = cur + " " + chunk;
+  try {
+    ta.focus();
+    const end = ta.value.length;
+    ta.selectionStart = ta.selectionEnd = end;
+  } catch (e) {}
+}
+
+function toggleStageVoice(si) {
+  si = String(si);
+  const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Ctor) {
+    toast("此瀏覽器不支援語音辨識，請用 Chrome 或 Edge");
+    return;
+  }
+  if (stageVoiceRec && String(stageVoiceSi) === si) {
+    stopStageVoice();
+    toast("已停止語音記錄");
+    return;
+  }
+  stopStageVoice();
+  const langSel = document.querySelector('[data-stage-rec-voice-lang="' + si + '"]');
+  const lang = langSel && langSel.value === "en-US" ? "en-US" : "zh-TW";
+  const rec = new Ctor();
+  rec.lang = lang;
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.onresult = function (ev) {
+    let finalText = "";
+    let interim = "";
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const piece = ev.results[i][0] ? ev.results[i][0].transcript : "";
+      if (ev.results[i].isFinal) finalText += piece;
+      else interim += piece;
+    }
+    if (finalText) appendStageVoiceText(si, finalText);
+    const btn = stageVoiceButton(si);
+    if (btn && stageVoiceRec === rec) {
+      const preview = String(interim || "").replace(/\s+/g, " ").trim();
+      btn.textContent = preview ? ("⏺ " + preview.slice(-16)) : "⏹ 停止錄音";
+    }
+  };
+  rec.onerror = function (ev) {
+    const code = ev && ev.error;
+    if (code === "aborted" || code === "no-speech") return;
+    const map = {
+      "not-allowed": "麥克風被拒絕，請允許瀏覽器使用麥克風",
+      "audio-capture": "找不到麥克風",
+      "network": "語音辨識需要網路連線",
+      "service-not-allowed": "語音服務無法使用"
+    };
+    toast(map[code] || ("語音辨識失敗：" + (code || "未知錯誤")));
+    stopStageVoice();
+  };
+  rec.onend = function () {
+    if (stageVoiceRec !== rec) return;
+    try { rec.start(); } catch (e) { stopStageVoice(); }
+  };
+  stageVoiceRec = rec;
+  stageVoiceSi = si;
+  const btn = stageVoiceButton(si);
+  if (btn) {
+    btn.classList.add("is-rec");
+    btn.textContent = "⏹ 停止錄音";
+  }
+  if (langSel) langSel.disabled = true;
+  try {
+    rec.start();
+    toast(lang === "en-US" ? "錄音中，請說英文。再按一次結束。" : "錄音中，請說繁體中文。再按一次結束。");
+  } catch (e) {
+    stopStageVoice();
+    toast("無法開始錄音：" + (e.message || e));
+  }
 }
 
 function submitStageRecord(si) {
@@ -5789,6 +5923,7 @@ function refreshItemsDetailOnly(scrollSave) {
 }
 
 function renderItems() {
+  stopStageVoice();
   const scrollSave = state._eqListScroll || captureEqListScroll();
   state._eqListScroll = null;
   const list = visibleEq();
@@ -8052,6 +8187,11 @@ document.body.addEventListener("click", ev => {
   if (ev.target.closest("[data-stage-rec-close]")) {
     state.stageRecordOpen = null;
     renderItems();
+    return;
+  }
+  const stageRecVoice = ev.target.closest("[data-stage-rec-voice]");
+  if (stageRecVoice) {
+    toggleStageVoice(stageRecVoice.dataset.stageRecVoice);
     return;
   }
   const stageRecSubmit = ev.target.closest("[data-stage-rec-submit]");

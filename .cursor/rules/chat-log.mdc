@@ -1,0 +1,20 @@
+---
+description: 將本專案對話寫入指定 chat-log 路徑
+alwaysApply: true
+---
+
+# Chat log（架線進度）
+
+本工作區（`github-pages` / line-progress）的對話紀錄寫到：
+
+`D:\專案\CURSOR\chat-log\github-pages-架線進度\`
+
+## 寫法
+
+- 目錄不存在就建立。
+- 依**當天日期**存一個 markdown：`YYYY-MM-DD.md`（例如 `2026-10-30.md`）。
+- 同一天的後續對話**續寫同一檔**，不要另開新檔。
+- 沿用既有格式：檔頭專案資訊；每段用 `## HH:MM　摘要`，底下 `**Jason**` / `**Assistant**`。
+- 重要結論、版次、線上 URL、關鍵檔案變更要寫進去；勿貼 secrets／完整進度 JSON。
+- 使用者明確要求記 log、或完成較大功能／架構說明後，應更新當日 log。
+- 線上網址：https://schmidtaiwan.github.io/line-progress/
