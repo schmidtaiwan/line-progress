@@ -628,6 +628,68 @@
     color: var(--muted);
     font-weight: 500;
   }
+  .stage-rec-row > td {
+    background: #f0f7ff; vertical-align: top; border-bottom: 1px solid #c5d8eb;
+  }
+  .stage-rec-row .stage-rec-label {
+    font-weight: 800; color: #1d4f91; font-size: 13px;
+  }
+  .stage-rec-row .stage-rec-sub {
+    margin-top: 2px; font-size: 11px; color: var(--muted); line-height: 1.35;
+  }
+  .stage-rec-cell {
+    cursor: pointer; min-width: 100px; transition: background .12s ease;
+  }
+  .stage-rec-cell:hover { background: #e4eef8; }
+  .stage-rec-cell.on {
+    background: #dbeafe; outline: 2px solid #1d4f91; outline-offset: -2px;
+  }
+  .stage-rec-hint {
+    font-size: 11px; color: #1d4f91; font-weight: 700; white-space: nowrap;
+  }
+  .stage-rec-count {
+    display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px;
+    background: #1d4f91; color: #fff; font-size: 10px; font-weight: 700;
+  }
+  .stage-rec-expand-row > td {
+    background: #f7fafc; padding: 12px 10px 16px; border-top: none;
+  }
+  .stage-rec-box {
+    border: 2px solid #1d4f91; border-radius: 12px; background: #f0f7ff; padding: 12px 14px;
+  }
+  .stage-rec-box .stage-rec-title {
+    margin: 0 0 8px; font-size: 15px; font-weight: 800; color: #1d4f91;
+  }
+  .stage-rec-box label {
+    display: block; font-size: 12px; font-weight: 700; color: #334155; margin: 8px 0 4px;
+  }
+  .stage-rec-box textarea {
+    width: 100%; box-sizing: border-box; min-height: 64px; padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: 8px; font: inherit; resize: vertical;
+  }
+  .stage-rec-form {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 10px;
+  }
+  .stage-rec-form select {
+    padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit;
+  }
+  .stage-rec-list {
+    list-style: none; margin: 0; padding: 0; max-height: 280px; overflow: auto;
+  }
+  .stage-rec-list li {
+    background: #fff; border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; margin-bottom: 6px; display: grid;
+    grid-template-columns: 1fr auto; gap: 8px; align-items: start;
+  }
+  .stage-rec-meta { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .stage-rec-kind {
+    display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px;
+    background: #e0e7ff; color: #3730a3; font-size: 11px; font-weight: 700;
+  }
+  .stage-rec-kind.k-會議記錄 { background: #fef3c7; color: #92400e; }
+  .stage-rec-kind.k-共同事項 { background: #dcfce7; color: #166534; }
+  .stage-rec-kind.k-重要事項 { background: #fee2e2; color: #991b1b; }
+  .stage-rec-text { font-size: 13px; line-height: 1.45; white-space: pre-wrap; }
   .note { color: var(--muted); font-size: 13px; margin-top: 10px; }
   .split { display: grid; grid-template-columns: 280px 1fr; gap: 12px; align-items: start; }
   .eq-list {
@@ -1784,7 +1846,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -1795,9 +1857,10 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 90;
-const PAGE_DATE = "2026-11-02";
+const PAGE_BUILD = 91;
+const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
+const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
 const HIERARCHY_SEED_R02 = {
   "arch": "hierarchy",
   "source": "進度表 晶睿TY2 2樓-R02產線電力、CDA及排氣工程20261026R 2.pdf",
@@ -2243,6 +2306,7 @@ function loadData() {
       if (Array.isArray(saved.stages) && saved.stages.length) data.stages = clone(saved.stages);
       if (Array.isArray(saved.segOrder) && saved.segOrder.length) data.segOrder = clone(saved.segOrder);
       if (Array.isArray(saved.milestones) && saved.milestones.length) data.milestones = clone(saved.milestones);
+      if (Array.isArray(saved.stageRecords)) data.stageRecords = clone(saved.stageRecords);
       data.equipment = clone(saved.equipment);
       return data;
     }
@@ -2273,6 +2337,7 @@ function cloudPayload() {
     milestones: DATA.milestones,
     stages: DATA.stages,
     segOrder: DATA.segOrder,
+    stageRecords: Array.isArray(DATA.stageRecords) ? DATA.stageRecords : [],
     nodes: Array.isArray(DATA.nodes) ? DATA.nodes : []
   };
 }
@@ -2355,6 +2420,8 @@ function applyProjectPayload(saved) {
   DATA.milestones = Array.isArray(saved.milestones) ? clone(saved.milestones) : [];
   if (Array.isArray(saved.stages)) DATA.stages = clone(saved.stages);
   if (Array.isArray(saved.segOrder)) DATA.segOrder = clone(saved.segOrder);
+  if (Array.isArray(saved.stageRecords)) DATA.stageRecords = clone(saved.stageRecords);
+  else if (!Array.isArray(DATA.stageRecords)) DATA.stageRecords = [];
   if (saved.title) DATA.title = saved.title;
   if (saved.subtitle) DATA.subtitle = saved.subtitle;
   // 一律覆寫來源，避免空白專案殘留上一案（如 VIVO xlsx）字串
@@ -2378,6 +2445,7 @@ function applyProjectPayload(saved) {
   state.openRemark = null;
   state.openDates = null;
   state.openHierRemark = null;
+  state.stageRecordOpen = null;
   return true;
 }
 
@@ -3481,7 +3549,144 @@ function normalizeStructure() {
   });
   if (state.stage >= n) state.stage = Math.max(0, n - 1);
   if (state.seg !== "全部" && !DATA.segOrder.includes(state.seg)) state.seg = "全部";
+  ensureStageRecords();
+  if (state.stageRecordOpen != null && state.stageRecordOpen >= n) state.stageRecordOpen = null;
   ensureActiveStageForEq(DATA.equipment[state.eq]);
+}
+
+/** 各階段總記錄（重要事項／共同事項／會議記錄），與設備細項分開 */
+function ensureStageRecords() {
+  const n = (DATA.stages || []).length;
+  if (!Array.isArray(DATA.stageRecords)) DATA.stageRecords = [];
+  while (DATA.stageRecords.length < n) DATA.stageRecords.push({ logs: [] });
+  if (DATA.stageRecords.length > n) DATA.stageRecords = DATA.stageRecords.slice(0, n);
+  DATA.stageRecords = DATA.stageRecords.map(function (rec) {
+    if (!rec || typeof rec !== "object") return { logs: [] };
+    if (!Array.isArray(rec.logs)) rec.logs = [];
+    return rec;
+  });
+  return DATA.stageRecords;
+}
+
+function stageRecordCount(si) {
+  ensureStageRecords();
+  const rec = DATA.stageRecords[si];
+  return rec && Array.isArray(rec.logs) ? rec.logs.length : 0;
+}
+
+function toggleStageRecord(si) {
+  const idx = Number(si);
+  if (Number.isNaN(idx)) return;
+  state.stageRecordOpen = state.stageRecordOpen === idx ? null : idx;
+  if (state.tab === "items") renderItems();
+  else render();
+}
+
+function stageRecordEditorHtml(si) {
+  ensureStageRecords();
+  const stage = (DATA.stages || [])[si] || {};
+  const name = stage.name || stage.mark || ("階段" + (si + 1));
+  const logs = (DATA.stageRecords[si].logs || []).slice().reverse();
+  const kindOpts = STAGE_REC_KINDS.map(function (k) {
+    return `<option value="${escapeAttr(k)}">${escapeHtml(k)}</option>`;
+  }).join("");
+  const list = logs.length
+    ? `<ul class="stage-rec-list">${logs.map(function (e, revI) {
+        const realIdx = (DATA.stageRecords[si].logs.length - 1) - revI;
+        const kind = e.kind || "重要事項";
+        const kindCls = "stage-rec-kind k-" + String(kind).replace(/\s+/g, "");
+        return `<li>
+          <div>
+            <div class="stage-rec-meta">
+              <span class="${kindCls}">${escapeHtml(kind)}</span>
+              ${escapeHtml(formatTaiwanDateTime(e.at))}${e.by ? "　" + escapeHtml(e.by) : ""}
+            </div>
+            <div class="stage-rec-text">${escapeHtml(e.text || "（空白）")}</div>
+          </div>
+          <button type="button" class="btn-del icon-only" data-del-stage-rec="${si}" data-stage-rec-i="${realIdx}" title="刪除此筆記錄" aria-label="刪除記錄">🗑</button>
+        </li>`;
+      }).join("")}</ul>`
+    : `<p class="note" style="margin:0">尚無記錄。可登記此階段的重要事項、各設備共同事項或會議記錄。</p>`;
+  return `<div class="stage-rec-box" data-stage-rec-box="${si}">
+    <div class="stage-rec-title">📋 ${escapeHtml(name)}｜階段總記錄</div>
+    <p class="note" style="margin:0 0 8px">跨設備共用：重要事項、共同事項、會議記錄。寫入本機後請按「儲存」同步雲端。</p>
+    <label>記錄類型</label>
+    <div class="stage-rec-form">
+      <select data-stage-rec-kind="${si}">${kindOpts}</select>
+      <button type="button" class="btn-cloud" data-stage-rec-submit="${si}">新增記錄</button>
+      <button type="button" class="btn-cloud ghost" data-stage-rec-close="${si}">收合</button>
+    </div>
+    <label>內容</label>
+    <textarea data-stage-rec-text="${si}" rows="3" placeholder="例如：Kick-off 會議決議、各設備共用介面規格、風險與待辦…"></textarea>
+    <label>歷史（${logs.length}）</label>
+    ${list}
+  </div>`;
+}
+
+function buildStageRecordsMatrixRows(colN) {
+  ensureStageRecords();
+  const stages = DATA.stages || [];
+  const cells = stages.map(function (_s, si) {
+    const n = stageRecordCount(si);
+    const on = state.stageRecordOpen === si;
+    return `<td class="stage-rec-cell ${on ? "on" : ""}" data-stage-rec="${si}" title="展開／收合此階段總記錄">
+      <div class="stage-rec-hint">${on ? "▼ 收合記錄" : "▶ 展開記錄"}${n ? `<span class="stage-rec-count">${n}</span>` : ""}</div>
+    </td>`;
+  }).join("");
+  let html = `<tr class="stage-rec-row">
+    <td colspan="3">
+      <div class="stage-rec-label">總記錄</div>
+      <div class="stage-rec-sub">各階段重要事項／共同事項／會議記錄（點階段欄展開）</div>
+    </td>
+    ${cells}
+    <td></td>
+    <td></td>
+  </tr>`;
+  if (state.stageRecordOpen != null && state.stageRecordOpen >= 0 && state.stageRecordOpen < stages.length) {
+    html += `<tr class="stage-rec-expand-row">
+      <td colspan="${colN}">${stageRecordEditorHtml(state.stageRecordOpen)}</td>
+    </tr>`;
+  }
+  return html;
+}
+
+function submitStageRecord(si) {
+  ensureStageRecords();
+  const idx = Number(si);
+  if (Number.isNaN(idx) || !DATA.stageRecords[idx]) return;
+  const ta = document.querySelector(`[data-stage-rec-text="${idx}"]`);
+  const sel = document.querySelector(`[data-stage-rec-kind="${idx}"]`);
+  const text = ta ? String(ta.value || "").trim() : "";
+  if (!text) {
+    toast("請先填寫記錄內容");
+    if (ta) try { ta.focus(); } catch (e) {}
+    return;
+  }
+  let kind = sel ? String(sel.value || "") : STAGE_REC_KINDS[0];
+  if (STAGE_REC_KINDS.indexOf(kind) < 0) kind = STAGE_REC_KINDS[0];
+  DATA.stageRecords[idx].logs.push({
+    at: new Date().toISOString(),
+    kind: kind,
+    text: text,
+    by: accountScopeKey() || ""
+  });
+  state.stageRecordOpen = idx;
+  saveLocal("已新增「" + kind + "」到階段總記錄");
+  renderItems();
+  toast("已新增階段記錄");
+}
+
+function deleteStageRecord(si, logI) {
+  ensureStageRecords();
+  const idx = Number(si);
+  const li = Number(logI);
+  const rec = DATA.stageRecords[idx];
+  if (!rec || !Array.isArray(rec.logs) || li < 0 || li >= rec.logs.length) return;
+  if (!confirm("刪除此筆階段記錄？")) return;
+  rec.logs.splice(li, 1);
+  state.stageRecordOpen = idx;
+  saveLocal("已刪除階段總記錄");
+  renderItems();
 }
 
 /** 各設備勾選的適用階段；缺省＝全選（true） */
@@ -5502,8 +5707,18 @@ function renderItems() {
   state._eqListScroll = null;
   const list = visibleEq();
   if (!list.length) {
-    document.getElementById("items").innerHTML = toolbar(`<label><input type="checkbox" id="onlyHigh" ${state.onlyHigh ? "checked" : ""}> 只看高急迫</label>`)
-      + `<p class="note">沒有符合的設備</p>`;
+    const stageCountEmpty = (DATA.stages || []).length;
+    const colNEmpty = 5 + stageCountEmpty;
+    const stageHeadsEmpty = overviewStageHeadHtml();
+    const stageRecEmpty = buildStageRecordsMatrixRows(colNEmpty);
+    document.getElementById("items").innerHTML = `
+      ${toolbar(`<label><input type="checkbox" id="onlyHigh" ${state.onlyHigh ? "checked" : ""}> 只看高急迫</label>`)}
+      <h2 class="section-title">工作項目清單（總表展開）</h2>
+      <p class="note">沒有符合的設備；仍可在「總記錄」登記各階段重要／共同／會議事項。</p>
+      <div class="scroll"><table class="ov-eq-table items-matrix">
+        <thead><tr><th>項次</th><th>製程段</th><th>設備名稱</th>${stageHeadsEmpty}<th>整體</th><th>延誤數</th></tr></thead>
+        <tbody>${stageRecEmpty}<tr><td colspan="${colNEmpty}">沒有符合的設備</td></tr></tbody>
+      </table></div>`;
     return;
   }
   if (!list.some(eq => DATA.equipment.indexOf(eq) === state.eq)) {
@@ -5549,13 +5764,14 @@ function renderItems() {
     return html;
   }).join("");
 
+  const stageRecRows = buildStageRecordsMatrixRows(colN);
   document.getElementById("items").innerHTML = `
     ${toolbar(`<label><input type="checkbox" id="onlyHigh" ${state.onlyHigh ? "checked" : ""}> 只看高急迫</label>`)}
     <h2 class="section-title">工作項目清單（總表展開）</h2>
-    <p class="note">點各階段儲存格（完成率）可展開該設備該階段的待完成事項；再點一次可收合。展開後可改完成率／急迫性／狀態／照片。</p>
+    <p class="note">表頭下「總記錄」可展開各階段重要事項／共同事項／會議記錄。點各設備階段儲存格可展開細項；再點一次可收合。</p>
     <div class="scroll"><table class="ov-eq-table items-matrix">
       <thead><tr><th>項次</th><th>製程段</th><th>設備名稱</th>${stageHeads}<th>整體</th><th>延誤數</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="${colN}">沒有符合的設備</td></tr>`}</tbody>
+      <tbody>${stageRecRows}${rows || `<tr><td colspan="${colN}">沒有符合的設備</td></tr>`}</tbody>
     </table></div>`;
   pinEqListScroll(scrollSave);
 }
@@ -7740,6 +7956,26 @@ document.body.addEventListener("click", ev => {
     state.stage = 0;
     state.itemsExpand = true;
     render();
+    return;
+  }
+  const stageRecCell = ev.target.closest("#items [data-stage-rec]");
+  if (stageRecCell && !ev.target.closest("[data-stage-rec-box]")) {
+    toggleStageRecord(stageRecCell.dataset.stageRec);
+    return;
+  }
+  if (ev.target.closest("[data-stage-rec-close]")) {
+    state.stageRecordOpen = null;
+    renderItems();
+    return;
+  }
+  const stageRecSubmit = ev.target.closest("[data-stage-rec-submit]");
+  if (stageRecSubmit) {
+    submitStageRecord(stageRecSubmit.dataset.stageRecSubmit);
+    return;
+  }
+  const stageRecDel = ev.target.closest("[data-del-stage-rec]");
+  if (stageRecDel) {
+    deleteStageRecord(stageRecDel.dataset.delStageRec, stageRecDel.dataset.stageRecI);
     return;
   }
   const itemsCell = ev.target.closest("#items [data-items-eq][data-items-stage]");
