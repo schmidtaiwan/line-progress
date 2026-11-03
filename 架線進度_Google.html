@@ -1906,7 +1906,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 105;
+const PAGE_BUILD = 106;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -3722,7 +3722,7 @@ function stageRecordEditorHtml(si) {
     </div>
     <div class="stage-rec-content-head">
       <label>內容</label>
-      <button type="button" class="btn-voice-act" data-stage-rec-summary="${si}" title="用 AI 把內容整理成繁體中文重點">轉成重點摘要</button>
+      <button type="button" class="btn-voice-act" data-stage-rec-summary="${si}" title="不使用 AI，從內容抽出含數字或明確交辦的句子">轉成重點摘要</button>
     </div>
     <textarea data-stage-rec-text="${si}" rows="3" placeholder="例如：Kick-off 會議決議、各設備共用介面規格、風險與待辦…"></textarea>
     <label>照片（${photos.length}）</label>
@@ -3868,82 +3868,49 @@ function toggleStageVoice(si) {
   }
 }
 
-async function aiKeyPoints(text) {
-  const opts = {
-    type: "key-points",
-    format: "plain-text",
-    length: "medium",
-    sharedContext: "產線架設進度的語音或會議紀錄。用繁體中文條列重點，保留數字、日期、負責人與待辦。",
-    expectedInputLanguages: ["zh", "en"],
-    outputLanguage: "zh-Hant"
-  };
-  if (window.Summarizer && typeof Summarizer.create === "function") {
-    let availability = "available";
-    if (typeof Summarizer.availability === "function") {
-      try { availability = await Summarizer.availability(opts); } catch (e) { availability = "available"; }
-    }
-    if (availability === "unavailable") {
-      throw new Error("此 Chrome 沒有內建 AI 模型。請更新 Chrome，或到 chrome://flags 開啟 Summarizer。");
-    }
-    if (availability === "downloadable" || availability === "downloading") {
-      toast("正在下載瀏覽器 AI 模型，請稍候…");
-    }
-    let summarizer;
-    try {
-      summarizer = await Summarizer.create(opts);
-    } catch (e) {
-      const lite = {
-        type: "key-points",
-        format: "plain-text",
-        length: "medium",
-        sharedContext: opts.sharedContext
-      };
-      summarizer = await Summarizer.create(lite);
-    }
-    return summarizer.summarize(text, {
-      context: "整理成繁體中文重點，一行一點，不要開場白。"
-    });
-  }
-  const LM = window.LanguageModel;
-  if (LM && typeof LM.create === "function") {
-    const session = await LM.create({
-      expectedInputs: [{ type: "text", languages: ["zh", "en"] }],
-      expectedOutputs: [{ type: "text", languages: ["zh"] }]
-    });
-    return session.prompt("請將以下內容改寫成繁體中文重點摘要，用「・」條列，保留數字、期限、負責人與待辦。不要加開場白。\n\n" + text);
-  }
-  throw new Error("此瀏覽器沒有內建 AI。請用最新版 Chrome。");
+function localKeyPoints(text) {
+  const raw = String(text || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  const cleaned = raw.replace(/(嗯+|啊+|喔+|哦+|那個|就是說|對對+|好的好的)/g, " ");
+  const parts = cleaned.split(/[。！？!?；;\n]+/).flatMap(function (seg) {
+    return String(seg || "").split(/[，,、]+/);
+  }).map(function (s) {
+    return s.replace(/^(所以|因此|那當然|當然|以後|需要|其實|然後|請)+/, "")
+      .replace(/^[\s呢嗎吧啊呀的]+|[\s呢嗎吧啊呀的]+$/g, "")
+      .trim();
+  }).filter(function (s) {
+    return s.length >= 8 && !/的時候$|的話$|什麼意思|很難以分/.test(s);
+  });
+  const concrete = /分配|項目|站子|站別|設備|負責|待辦|截止|確認|\d/;
+  const picked = [];
+  const seen = [];
+  parts.forEach(function (p) {
+    if (!concrete.test(p)) return;
+    const key = p.slice(0, 12);
+    if (seen.some(function (s) { return s.indexOf(key) >= 0 || key.indexOf(s) >= 0; })) return;
+    seen.push(key);
+    picked.push("・" + p);
+  });
+  return picked.slice(0, 6).join("\n");
 }
 
-async function summarizeStageContent(si) {
+function summarizeStageContent(si) {
   const ta = document.querySelector('[data-stage-rec-text="' + si + '"]');
   if (!ta) return;
   const text = String(ta.value || "").trim();
   if (!text) {
     toast("請先用語音或手動填寫內容");
-    if (ta) try { ta.focus(); } catch (e) {}
+    try { ta.focus(); } catch (e) {}
     return;
   }
-  const btn = document.querySelector('[data-stage-rec-summary="' + si + '"]');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "摘要中…";
+  const summary = localKeyPoints(text);
+  if (!summary) {
+    toast("沒有抽出含數字或明確交辦的句子。辨識聽錯的句子不會自動改正。");
+    return;
   }
-  try {
-    const summary = String(await aiKeyPoints(text) || "").trim();
-    if (!summary) throw new Error("沒有產生摘要");
-    ta.value = summary;
-    try { ta.focus(); } catch (e2) {}
-    toast("已寫入 AI 重點摘要");
-  } catch (e) {
-    console.warn(e);
-    toast((e && e.message) || "摘要失敗");
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "轉成重點摘要";
-    }
-  }
+  ta.value = summary;
+  try { ta.focus(); } catch (e2) {}
+  toast("已抽出重點（未使用 AI）");
 }
 
 function submitStageRecord(si) {
