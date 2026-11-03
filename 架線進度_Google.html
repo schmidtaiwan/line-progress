@@ -1906,7 +1906,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 106;
+const PAGE_BUILD = 107;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -3709,7 +3709,8 @@ function stageRecordEditorHtml(si) {
       <button type="button" class="btn-cloud" data-stage-rec-submit="${si}">新增記錄</button>
       <button type="button" class="btn-cloud ghost" data-stage-rec-close="${si}">收合</button>
       <span class="attach-actions">
-        <button type="button" class="btn-photo ${photos.length ? "has" : ""}" data-upload-stage-photo="${si}" title="上傳照片">📷 上傳照片${photos.length ? " " + photos.length : ""}</button>
+        <button type="button" class="btn-photo ${photos.length ? "has" : ""}" data-upload-stage-photo="${si}" title="選檔上傳，或在此畫面按 Ctrl+V 貼上截圖">📷 上傳照片${photos.length ? " " + photos.length : ""}</button>
+        <button type="button" class="btn-photo" data-paste-stage-photo="${si}" title="貼上剪貼簿裡的截圖或圖片">貼上圖片</button>
         <input class="photo-input" type="file" accept="image/*" multiple data-stage-photo-file="${si}">
         <button type="button" class="btn-file ${files.length ? "has" : ""}" data-upload-stage-file="${si}" title="上傳 TXT／Word／PPT／Excel／PDF／其它檔案">📎 上傳檔案${files.length ? " " + files.length : ""}</button>
         <input class="file-input" type="file" accept="${FILE_ACCEPT}" multiple data-stage-file-file="${si}">
@@ -4898,10 +4899,11 @@ function hierPhotoBtnHtml(node) {
   const cls = "btn-photo" + (n ? " has" : "");
   const label = n ? ("照片 " + n) : "上傳照片";
   const tip = n
-    ? "左鍵／點擊：再上傳　｜　右鍵／長按：預覽"
-    : "可選相簿或檔案資料夾";
+    ? "左鍵／點擊：再上傳　｜　右鍵／長按：預覽　｜　Ctrl+V 貼上截圖"
+    : "可選相簿或檔案，或按 Ctrl+V 貼上截圖";
   return `<div class="photo-cell">
     <button type="button" class="${cls}" data-hier-upload-photo="${escapeAttr(id)}" title="${escapeAttr(tip)}">${label}</button>
+    <button type="button" class="btn-photo" data-paste-hier-photo="${escapeAttr(id)}" title="貼上剪貼簿裡的截圖或圖片">貼上</button>
     <input class="photo-input" type="file" accept="image/*" multiple data-hier-photo-file="${escapeAttr(id)}">
   </div>`;
 }
@@ -5679,11 +5681,12 @@ function photoBtnHtml(it, idx) {
   const cls = "btn-photo" + (n ? " has" : "");
   const label = n ? ("照片 " + n) : "上傳照片";
   const tip = n
-    ? "左鍵／點擊：再上傳　｜　右鍵／長按：預覽"
-    : "可選相簿或檔案資料夾（不強制相機）";
+    ? "左鍵／點擊：再上傳　｜　右鍵／長按：預覽　｜　Ctrl+V 貼上截圖"
+    : "可選相簿或檔案，或按 Ctrl+V 貼上截圖";
   // 不加 capture，手機才可選相簿／檔案；multiple 可一次多選
   return `<div class="photo-cell">
     <button type="button" class="${cls}" data-upload-photo="${idx}" title="${escapeAttr(tip)}">${label}</button>
+    <button type="button" class="btn-photo" data-paste-photo="${idx}" title="貼上剪貼簿裡的截圖或圖片">貼上</button>
     <input class="photo-input" type="file" accept="image/*" multiple data-photo-file="${idx}">
   </div>`;
 }
@@ -8439,6 +8442,19 @@ document.body.addEventListener("click", ev => {
     if (input) { input.removeAttribute("capture"); input.click(); }
     return;
   }
+  const pastePhotoBtn = ev.target.closest("[data-paste-stage-photo], [data-paste-photo], [data-paste-hier-photo]");
+  if (pastePhotoBtn) {
+    let target = null;
+    if (pastePhotoBtn.hasAttribute("data-paste-stage-photo")) {
+      target = { kind: "stage", si: Number(pastePhotoBtn.getAttribute("data-paste-stage-photo")) };
+    } else if (pastePhotoBtn.hasAttribute("data-paste-photo")) {
+      target = { kind: "item", idx: Number(pastePhotoBtn.getAttribute("data-paste-photo")) };
+    } else {
+      target = { kind: "hier", id: pastePhotoBtn.getAttribute("data-paste-hier-photo") };
+    }
+    readClipboardAndUpload(target);
+    return;
+  }
   const uploadStageFileBtn = ev.target.closest("[data-upload-stage-file]");
   if (uploadStageFileBtn) {
     const si = uploadStageFileBtn.dataset.uploadStageFile;
@@ -8744,6 +8760,224 @@ document.getElementById("importJsonInput")?.addEventListener("change", async (ev
   if (file) await handleImportJsonFile(file);
 });
 
+function imageFileFromBlob(blob, type, index) {
+  const mime = type || (blob && blob.type) || "image/png";
+  let ext = String(mime.split("/")[1] || "png").toLowerCase();
+  if (ext === "jpeg") ext = "jpg";
+  if (ext === "svg+xml") ext = "svg";
+  ext = ext.replace(/[^a-z0-9]/g, "") || "png";
+  const orig = blob instanceof File ? String(blob.name || "") : "";
+  const generic = !orig || /^image\.(png|jpe?g|gif|webp|bmp)$/i.test(orig);
+  const name = generic ? ("paste" + (index ? "_" + (index + 1) : "") + "." + ext) : orig;
+  return new File([blob], name, { type: mime, lastModified: Date.now() });
+}
+
+function filesFromPasteEvent(ev) {
+  const dt = ev.clipboardData;
+  if (!dt) return [];
+  const files = [];
+  const items = dt.items ? Array.from(dt.items) : [];
+  items.forEach(function (item) {
+    if (item.kind === "file" && String(item.type || "").indexOf("image/") === 0) {
+      const f = item.getAsFile();
+      if (f && f.size) files.push(imageFileFromBlob(f, f.type || item.type, files.length));
+    }
+  });
+  if (!files.length && dt.files && dt.files.length) {
+    Array.from(dt.files).forEach(function (f) {
+      if (f && String(f.type || "").indexOf("image/") === 0 && f.size) {
+        files.push(imageFileFromBlob(f, f.type, files.length));
+      }
+    });
+  }
+  return files;
+}
+
+function photoPasteTarget(fromEl) {
+  const el = fromEl && fromEl.nodeType === 1 ? fromEl : (fromEl && fromEl.parentElement);
+  if (el && el.closest) {
+    const box = el.closest("[data-stage-rec-box]");
+    if (box) return { kind: "stage", si: Number(box.getAttribute("data-stage-rec-box")) };
+    const hier = el.closest("[data-hier-remark-for]");
+    if (hier) return { kind: "hier", id: hier.getAttribute("data-hier-remark-for") };
+    const hierRow = el.closest("[data-hier-id]");
+    if (hierRow && hierRow.querySelector("[data-paste-hier-photo]")) {
+      return { kind: "hier", id: hierRow.getAttribute("data-hier-id") };
+    }
+    const item = el.closest("tr[data-item-idx], .m-item-card[data-item-idx]");
+    if (item && item.querySelector("[data-photo-file], [data-paste-photo]")) {
+      return { kind: "item", idx: Number(item.getAttribute("data-item-idx")) };
+    }
+  }
+  if (state.stageRecordOpen != null && document.querySelector("[data-stage-rec-box]")) {
+    return { kind: "stage", si: Number(state.stageRecordOpen) };
+  }
+  if (state.openHierRemark && document.querySelector("[data-hier-remark-for]")) {
+    return { kind: "hier", id: state.openHierRemark };
+  }
+  if (state.openRemark != null && document.querySelector('[data-photo-file="' + state.openRemark + '"]')) {
+    return { kind: "item", idx: Number(state.openRemark) };
+  }
+  return null;
+}
+
+function captureStageRecDraft(si) {
+  const ta = document.querySelector('[data-stage-rec-text="' + si + '"]');
+  const kind = document.querySelector('[data-stage-rec-kind="' + si + '"]');
+  const lang = document.querySelector('[data-stage-rec-voice-lang="' + si + '"]');
+  return {
+    text: ta ? ta.value : "",
+    kind: kind ? kind.value : "",
+    lang: lang ? lang.value : ""
+  };
+}
+
+function restoreStageRecDraft(si, draft) {
+  if (!draft) return;
+  const ta = document.querySelector('[data-stage-rec-text="' + si + '"]');
+  const kind = document.querySelector('[data-stage-rec-kind="' + si + '"]');
+  const lang = document.querySelector('[data-stage-rec-voice-lang="' + si + '"]');
+  if (ta) ta.value = draft.text;
+  if (kind && draft.kind) kind.value = draft.kind;
+  if (lang && draft.lang) lang.value = draft.lang;
+}
+
+let photoPasteBusy = false;
+
+async function pushPastedPhotos(files, target) {
+  if (!files || !files.length || !target) return;
+  if (photoPasteBusy) {
+    toast("正在上傳照片…");
+    return;
+  }
+  if (!window.LineOneDrive || !isCloudLoggedIn()) {
+    toast("請先登入 Google");
+    return;
+  }
+  photoPasteBusy = true;
+  try {
+    toast("正在上傳照片（" + files.length + "）…");
+    if (target.kind === "stage") {
+      const si = target.si;
+      ensureStageRecords();
+      const rec = DATA.stageRecords[si];
+      if (!rec) return;
+      if (!Array.isArray(rec.photos)) rec.photos = [];
+      const stageName = ((DATA.stages || [])[si] && DATA.stages[si].name) || ("stage" + si);
+      const label = "stage_" + String(stageName).slice(0, 20);
+      for (const file of files) rec.photos.push(await LineOneDrive.uploadPhoto(file, label));
+      state.stageRecordOpen = si;
+      const draft = captureStageRecDraft(si);
+      saveLocal("階段照片已上傳");
+      try {
+        await LineOneDrive.uploadJson(cloudPayload());
+        state.dirty = false;
+        updateCloudBar();
+      } catch (e2) {
+        console.warn(e2);
+        toast("照片已上傳，但進度儲存失敗，請再按「儲存」");
+      }
+      renderItems();
+      restoreStageRecDraft(si, draft);
+    } else if (target.kind === "hier") {
+      const node = (DATA.nodes || []).find(n => n.id === target.id);
+      if (!node) return;
+      if (!Array.isArray(node.photos)) node.photos = [];
+      const label = "hier_" + String(node.name || "item").slice(0, 20);
+      for (const file of files) node.photos.push(await LineOneDrive.uploadPhoto(file, label));
+      state.openHierRemark = target.id;
+      state.dirty = true;
+      saveLocal("照片已上傳");
+      try {
+        await LineOneDrive.uploadJson(cloudPayload());
+        state.dirty = false;
+        updateCloudBar();
+      } catch (e2) {
+        console.warn(e2);
+        toast("照片已上傳，但進度儲存失敗，請再按「儲存」");
+      }
+      render();
+    } else {
+      const idx = target.idx;
+      const eq = DATA.equipment[state.eq];
+      const it = eq && eq.stages[state.stage] && eq.stages[state.stage].items[idx];
+      if (!it) return;
+      if (!Array.isArray(it.photos)) it.photos = [];
+      const label = (eq.idx || "") + "_" + String(it.item || "item").slice(0, 20);
+      for (const file of files) it.photos.push(await LineOneDrive.uploadPhoto(file, label));
+      state.openRemark = idx;
+      state.itemsExpand = true;
+      saveLocal("照片已上傳");
+      try {
+        await LineOneDrive.uploadJson(cloudPayload());
+        state.dirty = false;
+        updateCloudBar();
+      } catch (e2) {
+        console.warn(e2);
+        toast("照片已上傳，但進度儲存失敗，請再按「儲存」");
+      }
+      render();
+    }
+    toast("已上傳 " + files.length + " 張照片到雲端");
+  } catch (e) {
+    console.error(e);
+    toast("上傳失敗：" + (e.message || e));
+  } finally {
+    photoPasteBusy = false;
+  }
+}
+
+function readClipboardAndUpload(target) {
+  if (!navigator.clipboard || typeof navigator.clipboard.read !== "function") {
+    toast("請在此畫面按 Ctrl+V 貼上圖片");
+    return;
+  }
+  navigator.clipboard.read().then(function (items) {
+    const jobs = [];
+    (items || []).forEach(function (item) {
+      const type = (item.types || []).find(t => String(t).indexOf("image/") === 0);
+      if (!type) return;
+      const index = jobs.length;
+      jobs.push(item.getType(type).then(function (blob) {
+        return imageFileFromBlob(blob, type, index);
+      }));
+    });
+    return Promise.all(jobs);
+  }).then(function (files) {
+    const list = (files || []).filter(Boolean);
+    if (!list.length) {
+      toast("剪貼簿裡沒有圖片。請先複製截圖，或在此畫面按 Ctrl+V");
+      return;
+    }
+    return pushPastedPhotos(list, target);
+  }).catch(function (e) {
+    const msg = (e && (e.message || e.name)) || "";
+    if (/denied|not allowed|permission|NotAllowed/i.test(msg)) {
+      toast("無法讀取剪貼簿。請在此畫面按 Ctrl+V 貼上圖片");
+    } else {
+      toast("無法讀取剪貼簿，請改按 Ctrl+V");
+    }
+  });
+}
+
+document.addEventListener("paste", function (ev) {
+  const files = filesFromPasteEvent(ev);
+  if (!files.length) return;
+  const el = ev.target;
+  const tag = el && el.tagName;
+  const editing = !!(el && (tag === "TEXTAREA" || tag === "INPUT" || el.isContentEditable));
+  let text = "";
+  try { text = String((ev.clipboardData && ev.clipboardData.getData("text/plain")) || "").trim(); } catch (e) {}
+  if (editing && text) return;
+  const target = photoPasteTarget(el);
+  if (!target) {
+    if (!editing) toast("請先展開要貼照片的階段或項目");
+    return;
+  }
+  ev.preventDefault();
+  pushPastedPhotos(files, target);
+});
+
 document.body.addEventListener("change", async (ev) => {
   const hierField = ev.target.closest("[data-hier-field]");
   if (hierField) {
@@ -8841,8 +9075,10 @@ document.body.addEventListener("change", async (ev) => {
         rec.photos.push(meta);
       }
       state.stageRecordOpen = si;
+      const draft = captureStageRecDraft(si);
       await persistAfterUpload("階段照片已上傳", "照片已上傳，但進度儲存失敗，請再按「儲存」");
       renderItems();
+      restoreStageRecDraft(si, draft);
       toast("已上傳 " + files.length + " 張照片到雲端");
     } catch (e) {
       console.error(e);
