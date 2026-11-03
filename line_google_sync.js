@@ -2391,7 +2391,8 @@
     return (cfg.filesFolder || "files").trim() || "files";
   }
 
-  function ensureNamedChildFolder(folderName) {
+  /** 在「目前專案資料夾」下確保 photos／files 子資料夾（不可與上方 ensureNamedChildFolder(parentId,name) 同名，否則會覆寫） */
+  function ensureActiveProjectChildFolder(folderName) {
     return ensureFolderId().then(function (parentId) {
       const name = String(folderName || "files").trim() || "files";
       return findChildFolder(parentId === "root" ? "root" : parentId, name).then(function (id) {
@@ -2402,11 +2403,11 @@
   }
 
   function ensurePhotosFolderId() {
-    return ensureNamedChildFolder(photosFolderName());
+    return ensureActiveProjectChildFolder(photosFolderName());
   }
 
   function ensureFilesFolderId() {
-    return ensureNamedChildFolder(filesFolderName());
+    return ensureActiveProjectChildFolder(filesFolderName());
   }
 
   function sanitizeFileName(name) {
