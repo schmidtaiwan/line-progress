@@ -1915,7 +1915,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 108;
+const PAGE_BUILD = 109;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -2634,25 +2634,49 @@ function refreshUnifiedNodes() {
 
 function blankProjectPayload(name) {
   const label = String(name || "新專案").trim() || "新專案";
-  const id1 = "n1";
-  const id2 = "n2";
-  const id3 = "n3";
-  const d = clone(BASE);
+  const stageDefs = [
+    { key: "stage1", name: "階段1", mark: "階1" },
+    { key: "stage2", name: "階段2", mark: "階2" }
+  ];
+  const blankItem = function () {
+    return {
+      item: "01. 新項目",
+      pct: 0,
+      urg: "中",
+      start: "",
+      due: "",
+      actual: "",
+      status: "未開始",
+      note: "",
+      photos: [],
+      progressLog: []
+    };
+  };
+  const equipment = [{
+    idx: "1",
+    seg: "",
+    name: "設備",
+    qty: "1",
+    pm: "-",
+    owner: "-",
+    startRow: null,
+    stageOn: stageDefs.map(function () { return true; }),
+    stages: stageDefs.map(function () {
+      return { due: "", items: [blankItem()] };
+    })
+  }];
   return {
     arch: "unified",
     source: "",
     title: label + "｜進度",
-    subtitle: "共用架構：設定可維護階段、時程與結構（樹狀／設備）",
+    subtitle: "空白專案：1 設備、階段1／階段2（可於設定新增階段與設備）",
     savedAt: new Date().toISOString(),
-    equipment: [],
+    equipment: equipment,
     milestones: [],
-    stages: clone(d.stages || []),
+    stages: stageDefs,
     segOrder: [],
-    nodes: [
-      { id: id1, parentId: "", level: 1, kind: "group", name: label, days: 0, pct: 0, start: "", finish: "", note: "", photos: [] },
-      { id: id2, parentId: id1, level: 2, kind: "group", name: "階段一", days: 0, pct: 0, start: "", finish: "", note: "", photos: [] },
-      { id: id3, parentId: id2, level: 3, kind: "task", name: "工作項 1", days: 0, pct: 0, start: "", finish: "", note: "", photos: [], status: "未開始", urg: "中" }
-    ]
+    nodes: [],
+    stageRecords: stageDefs.map(function () { return { logs: [], photos: [], files: [] }; })
   };
 }
 
