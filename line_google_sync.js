@@ -2387,9 +2387,13 @@
     return (cfg.photosFolder || "photos").trim() || "photos";
   }
 
-  function ensurePhotosFolderId() {
+  function filesFolderName() {
+    return (cfg.filesFolder || "files").trim() || "files";
+  }
+
+  function ensureNamedChildFolder(folderName) {
     return ensureFolderId().then(function (parentId) {
-      const name = photosFolderName();
+      const name = String(folderName || "files").trim() || "files";
       return findChildFolder(parentId === "root" ? "root" : parentId, name).then(function (id) {
         if (id) return id;
         return createChildFolder(parentId === "root" ? "root" : parentId, name);
@@ -2397,35 +2401,60 @@
     });
   }
 
-  function sanitizeFileName(name) {
-    const raw = String(name || "photo.jpg").replace(/[\\/:*?"<>|]/g, "_").trim();
-    return raw || "photo.jpg";
+  function ensurePhotosFolderId() {
+    return ensureNamedChildFolder(photosFolderName());
   }
 
-  /** 上傳圖片到 LineProcess/photos，回傳 { id, name, mimeType, uploadedAt } */
-  function uploadPhoto(file, label) {
+  function ensureFilesFolderId() {
+    return ensureNamedChildFolder(filesFolderName());
+  }
+
+  function sanitizeFileName(name) {
+    const raw = String(name || "file.bin").replace(/[\\/:*?"<>|]/g, "_").trim();
+    return raw || "file.bin";
+  }
+
+  function guessMimeType(file, fallback) {
+    const mime = (file && file.type) || "";
+    if (mime) return mime;
+    const n = String((file && file.name) || "").toLowerCase();
+    if (/\.png$/i.test(n)) return "image/png";
+    if (/\.jpe?g$/i.test(n)) return "image/jpeg";
+    if (/\.gif$/i.test(n)) return "image/gif";
+    if (/\.webp$/i.test(n)) return "image/webp";
+    if (/\.txt$/i.test(n)) return "text/plain";
+    if (/\.csv$/i.test(n)) return "text/csv";
+    if (/\.pdf$/i.test(n)) return "application/pdf";
+    if (/\.docx?$/i.test(n)) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    if (/\.pptx?$/i.test(n)) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    if (/\.xlsx?$/i.test(n)) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    return fallback || "application/octet-stream";
+  }
+
+  /** 上傳任意檔到專案資料夾下指定子資料夾，回傳 { id, name, mimeType, uploadedAt, webViewLink, kind } */
+  function uploadDriveBlob(file, label, opts) {
+    opts = opts || {};
     if (!file) return Promise.reject(new Error("未選擇檔案"));
-    const mime = file.type || "image/jpeg";
-    if (mime && mime.indexOf("image/") !== 0 && mime !== "application/octet-stream") {
-      return Promise.reject(new Error("請選擇圖片檔"));
-    }
-    const base = sanitizeFileName(file.name || "photo.jpg");
+    const folderPromise = opts.folder === "photos" ? ensurePhotosFolderId() : ensureFilesFolderId();
+    const mime = guessMimeType(file, opts.fallbackMime || "application/octet-stream");
+    const base = sanitizeFileName(file.name || (opts.defaultName || "file.bin"));
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const prefix = label ? String(label).replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 40) + "_" : "";
     const name = prefix + stamp + "_" + base;
+    const errLabel = opts.errLabel || "上傳檔案";
     return ensureInit()
       .then(function () {
         if (!state.account) return login();
       })
       .then(function () {
         return withScopeRetry(function () {
-          return ensurePhotosFolderId().then(function (folderId) {
+          return folderPromise.then(function (folderId) {
             const meta = {
               name: name,
-              mimeType: mime.indexOf("image/") === 0 ? mime : "image/jpeg",
+              mimeType: mime,
               parents: [folderId]
             };
-            const boundary = "----linephoto" + String(Date.now()) + Math.random().toString(16).slice(2);
+            const boundary = "----linefile" + String(Date.now()) + Math.random().toString(16).slice(2);
             return file.arrayBuffer().then(function (buf) {
               const metaPart =
                 "--" + boundary + "\r\n" +
@@ -2449,7 +2478,7 @@
                   body: body
                 }
               ).then(function (res) {
-                if (!res.ok) return res.text().then(function (t) { throw new Error("上傳照片失敗 " + res.status + " " + t); });
+                if (!res.ok) return res.text().then(function (t) { throw new Error(errLabel + "失敗 " + res.status + " " + t); });
                 return res.json();
               }).then(function (f) {
                 return {
@@ -2457,13 +2486,42 @@
                   name: f.name || name,
                   mimeType: f.mimeType || meta.mimeType,
                   uploadedAt: new Date().toISOString(),
-                  webViewLink: f.webViewLink || ("https://drive.google.com/file/d/" + f.id + "/view")
+                  webViewLink: f.webViewLink || ("https://drive.google.com/file/d/" + f.id + "/view"),
+                  kind: opts.kind || "file",
+                  originalName: file.name || base
                 };
               });
             });
           });
         });
       });
+  }
+
+  /** 上傳圖片到專案 photos 資料夾 */
+  function uploadPhoto(file, label) {
+    if (!file) return Promise.reject(new Error("未選擇檔案"));
+    const mime = guessMimeType(file, "image/jpeg");
+    if (mime.indexOf("image/") !== 0 && mime !== "application/octet-stream") {
+      return Promise.reject(new Error("請選擇圖片檔"));
+    }
+    return uploadDriveBlob(file, label, {
+      folder: "photos",
+      kind: "photo",
+      fallbackMime: "image/jpeg",
+      defaultName: "photo.jpg",
+      errLabel: "上傳照片"
+    });
+  }
+
+  /** 上傳一般檔案（TXT／Word／PPT／Excel／其它）到專案 files 資料夾 */
+  function uploadFile(file, label) {
+    return uploadDriveBlob(file, label, {
+      folder: "files",
+      kind: "file",
+      fallbackMime: "application/octet-stream",
+      defaultName: "file.bin",
+      errLabel: "上傳檔案"
+    });
   }
 
   function deleteDriveFile(fileId) {
@@ -2654,6 +2712,7 @@
     uploadJson: uploadJson,
     scheduleUpload: scheduleUpload,
     uploadPhoto: uploadPhoto,
+    uploadFile: uploadFile,
     deleteDriveFile: deleteDriveFile,
     photoViewUrl: photoViewUrl,
     downloadFileBlob: downloadFileBlob,
