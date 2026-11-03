@@ -1048,6 +1048,22 @@
     border-color: #b42318;
     animation: voice-pulse 1.2s ease-in-out infinite;
   }
+  .btn-voice-act {
+    border: 1px solid #e7b3a8;
+    background: #fff;
+    color: #9f2d20;
+    border-radius: 8px;
+    padding: 4px 8px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-voice-act:hover { background: #fff5f3; }
+  .stage-rec-content-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px;
+  }
+  .stage-rec-content-head label { margin: 0; }
   @keyframes voice-pulse {
     50% { box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.28); }
   }
@@ -1890,7 +1906,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 104;
+const PAGE_BUILD = 105;
 const PAGE_DATE = "2026-11-03";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -3595,10 +3611,11 @@ function ensureStageRecords() {
   while (DATA.stageRecords.length < n) DATA.stageRecords.push({ logs: [] });
   if (DATA.stageRecords.length > n) DATA.stageRecords = DATA.stageRecords.slice(0, n);
   DATA.stageRecords = DATA.stageRecords.map(function (rec) {
-    if (!rec || typeof rec !== "object") return { logs: [], photos: [], files: [] };
+    if (!rec || typeof rec !== "object") return { logs: [], photos: [], files: [], voices: [] };
     if (!Array.isArray(rec.logs)) rec.logs = [];
     if (!Array.isArray(rec.photos)) rec.photos = [];
     if (!Array.isArray(rec.files)) rec.files = [];
+    if (!Array.isArray(rec.voices)) rec.voices = [];
     return rec;
   });
   return DATA.stageRecords;
@@ -3608,12 +3625,13 @@ function stageRecordCount(si) {
   ensureStageRecords();
   const rec = DATA.stageRecords[si];
   if (!rec) return 0;
-  return (rec.logs || []).length + (rec.photos || []).length + (rec.files || []).length;
+  return (rec.logs || []).length + (rec.photos || []).length + (rec.files || []).length + (rec.voices || []).length;
 }
 
 function fileKindLabel(meta) {
   const mime = String((meta && meta.mimeType) || "").toLowerCase();
   const name = String((meta && (meta.originalName || meta.name)) || "").toLowerCase();
+  if (mime.indexOf("audio/") === 0 || (meta && meta.kind === "voice") || /\.(webm|m4a|mp3|wav|ogg)$/i.test(name)) return "語音";
   if (mime.indexOf("image/") === 0 || /\.(png|jpe?g|gif|webp|bmp)$/i.test(name)) return "照片";
   if (/\.pdf$/i.test(name) || mime.indexOf("pdf") >= 0) return "PDF";
   if (/\.docx?$/i.test(name) || mime.indexOf("word") >= 0) return "Word";
@@ -3697,14 +3715,17 @@ function stageRecordEditorHtml(si) {
         <input class="photo-input" type="file" accept="image/*" multiple data-stage-photo-file="${si}">
         <button type="button" class="btn-file ${files.length ? "has" : ""}" data-upload-stage-file="${si}" title="上傳 TXT／Word／PPT／Excel／PDF／其它檔案">📎 上傳檔案${files.length ? " " + files.length : ""}</button>
         <input class="file-input" type="file" accept="${FILE_ACCEPT}" multiple data-stage-file-file="${si}">
-        <button type="button" class="btn-voice" data-stage-rec-voice="${si}" title="錄音並轉成文字，填入下方內容">🎤 語音記錄</button>
+        <button type="button" class="btn-voice" data-stage-rec-voice="${si}" title="錄音並存成音檔">🎤 語音記錄</button>
         <select class="voice-lang" data-stage-rec-voice-lang="${si}" title="辨識語言" aria-label="辨識語言">
           <option value="zh-TW">繁中</option>
           <option value="en-US">英文</option>
         </select>
       </span>
     </div>
-    <label>內容</label>
+    <div class="stage-rec-content-head">
+      <label>內容</label>
+      <button type="button" class="btn-voice-act" data-stage-rec-summary="${si}" title="用 AI 把內容整理成繁體中文重點">轉成重點摘要</button>
+    </div>
     <textarea data-stage-rec-text="${si}" rows="3" placeholder="例如：Kick-off 會議決議、各設備共用介面規格、風險與待辦…"></textarea>
     <label>照片（${photos.length}）</label>
     ${photoGal}
@@ -3846,6 +3867,84 @@ function toggleStageVoice(si) {
   } catch (e) {
     stopStageVoice();
     toast("無法開始錄音：" + (e.message || e));
+  }
+}
+
+async function aiKeyPoints(text) {
+  const opts = {
+    type: "key-points",
+    format: "plain-text",
+    length: "medium",
+    sharedContext: "產線架設進度的語音或會議紀錄。用繁體中文條列重點，保留數字、日期、負責人與待辦。",
+    expectedInputLanguages: ["zh", "en"],
+    outputLanguage: "zh-Hant"
+  };
+  if (window.Summarizer && typeof Summarizer.create === "function") {
+    let availability = "available";
+    if (typeof Summarizer.availability === "function") {
+      try { availability = await Summarizer.availability(opts); } catch (e) { availability = "available"; }
+    }
+    if (availability === "unavailable") {
+      throw new Error("此 Chrome 沒有內建 AI 模型。請更新 Chrome，或到 chrome://flags 開啟 Summarizer。");
+    }
+    if (availability === "downloadable" || availability === "downloading") {
+      toast("正在下載瀏覽器 AI 模型，請稍候…");
+    }
+    let summarizer;
+    try {
+      summarizer = await Summarizer.create(opts);
+    } catch (e) {
+      const lite = {
+        type: "key-points",
+        format: "plain-text",
+        length: "medium",
+        sharedContext: opts.sharedContext
+      };
+      summarizer = await Summarizer.create(lite);
+    }
+    return summarizer.summarize(text, {
+      context: "整理成繁體中文重點，一行一點，不要開場白。"
+    });
+  }
+  const LM = window.LanguageModel;
+  if (LM && typeof LM.create === "function") {
+    const session = await LM.create({
+      expectedInputs: [{ type: "text", languages: ["zh", "en"] }],
+      expectedOutputs: [{ type: "text", languages: ["zh"] }]
+    });
+    return session.prompt("請將以下內容改寫成繁體中文重點摘要，用「・」條列，保留數字、期限、負責人與待辦。不要加開場白。\n\n" + text);
+  }
+  throw new Error("此瀏覽器沒有內建 AI。請用最新版 Chrome。");
+}
+
+async function summarizeStageContent(si) {
+  const ta = document.querySelector('[data-stage-rec-text="' + si + '"]');
+  if (!ta) return;
+  const text = String(ta.value || "").trim();
+  if (!text) {
+    toast("請先用語音或手動填寫內容");
+    if (ta) try { ta.focus(); } catch (e) {}
+    return;
+  }
+  const btn = document.querySelector('[data-stage-rec-summary="' + si + '"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "摘要中…";
+  }
+  try {
+    const summary = String(await aiKeyPoints(text) || "").trim();
+    if (!summary) throw new Error("沒有產生摘要");
+    ta.value = summary;
+    try { ta.focus(); } catch (e2) {}
+    toast("已寫入 AI 重點摘要");
+  } catch (e) {
+    console.warn(e);
+    toast((e && e.message) || "摘要失敗");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "轉成重點摘要";
+    }
   }
 }
 
@@ -8192,6 +8291,11 @@ document.body.addEventListener("click", ev => {
   const stageRecVoice = ev.target.closest("[data-stage-rec-voice]");
   if (stageRecVoice) {
     toggleStageVoice(stageRecVoice.dataset.stageRecVoice);
+    return;
+  }
+  const stageRecSummary = ev.target.closest("[data-stage-rec-summary]");
+  if (stageRecSummary) {
+    summarizeStageContent(stageRecSummary.dataset.stageRecSummary);
     return;
   }
   const stageRecSubmit = ev.target.closest("[data-stage-rec-submit]");
