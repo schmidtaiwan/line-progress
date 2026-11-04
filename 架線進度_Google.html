@@ -1814,30 +1814,42 @@
     margin-top: 4px; padding-top: 4px; border-top: 1px dashed #e2e8f0;
   }
   .project-rail .rail-icon-btn {
-    display: inline-flex; align-items: center; justify-content: flex-start;
+    position: relative;
+    display: inline-flex; align-items: center; justify-content: center;
     box-sizing: border-box;
-    width: 36px; height: 36px; min-width: 36px; max-width: 100%;
+    width: 44px; height: 44px; min-width: 44px; max-width: 44px;
     border: 1px solid #cbd5e1; background: #fff; color: #16324a;
-    border-radius: 10px; padding: 0 9px; cursor: pointer;
+    border-radius: 12px; padding: 0; cursor: pointer;
     font: inherit; font-size: 13px; font-weight: 650;
-    overflow: hidden; white-space: nowrap;
-    transition: width 0.18s ease, background 0.15s, border-color 0.15s, color 0.15s;
+    overflow: visible; white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
   }
   .project-rail .rail-icon-btn .ico {
-    flex: 0 0 18px; width: 18px; text-align: center; line-height: 1; font-size: 15px;
+    flex: 0 0 auto; width: auto; text-align: center; line-height: 1; font-size: 22px;
   }
-  .project-rail .rail-icon-btn .lbl {
-    display: inline-block; max-width: 0; opacity: 0; overflow: hidden;
-    margin-left: 0; transition: max-width 0.18s ease, opacity 0.15s ease, margin-left 0.15s ease;
-  }
+  .project-rail .rail-icon-btn .lbl { display: none !important; }
   .project-rail .rail-icon-btn:hover,
   .project-rail .rail-icon-btn:focus-visible {
-    width: auto; min-width: 36px;
     background: #e7f0f7; border-color: #2b6cb0; outline: none;
   }
-  .project-rail .rail-icon-btn:hover .lbl,
-  .project-rail .rail-icon-btn:focus-visible .lbl {
-    max-width: 140px; opacity: 1; margin-left: 8px;
+  .project-rail .rail-icon-btn[title]:hover::after,
+  .project-rail .rail-icon-btn[title]:focus-visible::after {
+    content: attr(title);
+    position: absolute;
+    left: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 40;
+    padding: 5px 9px;
+    border-radius: 8px;
+    background: #16324a;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.3;
+    white-space: nowrap;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.22);
+    pointer-events: none;
   }
   .project-rail .rail-icon-btn.viewer {
     cursor: default; color: var(--muted); font-weight: 600;
@@ -2023,7 +2035,7 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, itemsSettingsOpen: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, stageRecCtx: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, itemsSettingsOpen: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, lastSyncedFp: "", mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, stageRecCtx: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -2034,7 +2046,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 118;
+const PAGE_BUILD = 119;
 const PAGE_DATE = "2026-11-04";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -3545,11 +3557,13 @@ async function activateProject(proj, opts) {
           if (loadGen !== state.projectLoadGen) return;
           state.dirty = false;
           saveLocal("已用本機正確資料覆寫雲端「" + proj.name + "」", { clearDirty: true });
+          rememberSyncedFingerprint();
         } else {
           await forceRecoverWrongProjectData(proj, { strandedPayload: cloud });
           if (loadGen !== state.projectLoadGen) return;
           state.dirty = false;
           saveLocal("已還原「" + proj.name + "」正確資料", { clearDirty: true });
+          rememberSyncedFingerprint();
         }
       } else if (hasHier || hasEq || (cloud && Array.isArray(cloud.equipment))) {
         applyProjectPayload(cloud);
@@ -3561,11 +3575,14 @@ async function activateProject(proj, opts) {
           if (loadGen !== state.projectLoadGen) return;
           state.dirty = false;
           saveLocal("已匯入 PDF 層級進度到「" + proj.name + "」", { clearDirty: true });
+          rememberSyncedFingerprint();
         } else {
           syncTitleToProject(proj);
           state.dirty = false;
           // 有本機時靜默寫回快取，不跳「已載入」干擾切換
           try { localStorage.setItem(STORE_KEY, JSON.stringify(cloudPayload())); } catch (e) {}
+          rememberSyncedFingerprint(cloud);
+          hideSyncConflict();
           if (!loadedLocal) {
             saveLocal("已載入專案「" + proj.name + "」", { clearDirty: true });
           } else {
@@ -3586,6 +3603,7 @@ async function activateProject(proj, opts) {
         if (loadGen !== state.projectLoadGen) return;
         state.dirty = false;
         saveLocal("已建立專案資料夾「" + proj.name + "」", { clearDirty: true });
+          rememberSyncedFingerprint();
       } else if (!loadedLocal) {
         toast("專案「" + proj.name + "」雲端尚無資料");
       }
@@ -3645,19 +3663,24 @@ async function confirmNewProject() {
     }
   }
 }
-/** 比對用指紋（忽略 savedAt，避免時間戳造成誤判） */
+/** 比對用指紋（忽略 savedAt；設備專案略過衍生 nodes，避免重算誤報） */
 function syncFingerprint(payload) {
   if (!payload) return "";
   try {
-    return JSON.stringify({
+    const hasEq = Array.isArray(payload.equipment) && payload.equipment.length > 0
+      && Array.isArray(payload.stages) && payload.stages.length > 0;
+    const body = {
       arch: payload.arch || "unified",
       source: payload.source || "",
       equipment: payload.equipment || [],
       milestones: payload.milestones || [],
       stages: payload.stages || [],
       segOrder: payload.segOrder || [],
-      nodes: payload.nodes || []
-    });
+      stageRecords: Array.isArray(payload.stageRecords) ? payload.stageRecords : []
+    };
+    // 設備 checklist：nodes 由 equipment 衍生；納入指紋會因 cloudPayload→refreshUnifiedNodes 重算而誤報
+    if (!hasEq) body.nodes = payload.nodes || [];
+    return JSON.stringify(body);
   } catch (e) {
     return "";
   }
@@ -3684,23 +3707,57 @@ function startCloudWatch() {
   stopCloudWatch();
   cloudWatchTimer = setInterval(function () { checkCloudDrift(); }, CLOUD_WATCH_MS);
 }
+function localSyncPayload() {
+  // 僅供指紋比對：不要呼叫 cloudPayload()／refreshUnifiedNodes，以免改寫 DATA.nodes 造成誤報
+  return {
+    arch: DATA.arch || "unified",
+    source: DATA.source || "",
+    equipment: DATA.equipment || [],
+    milestones: DATA.milestones || [],
+    stages: DATA.stages || [],
+    segOrder: DATA.segOrder || [],
+    stageRecords: Array.isArray(DATA.stageRecords) ? DATA.stageRecords : [],
+    nodes: Array.isArray(DATA.nodes) ? DATA.nodes : []
+  };
+}
+function rememberSyncedFingerprint(payload) {
+  const fp = syncFingerprint(payload || localSyncPayload());
+  state.lastSyncedFp = fp || "";
+  return state.lastSyncedFp;
+}
 async function checkCloudDrift() {
   if (!isCloudLoggedIn() || state.syncCheckBusy) return;
   if (document.hidden) return;
+  if (isProjectsOverview()) return;
   state.syncCheckBusy = true;
   try {
     const cloud = await LineOneDrive.downloadJson();
     if (!cloud) return;
-    const localFp = syncFingerprint(cloudPayload());
+    const localFp = syncFingerprint(localSyncPayload());
     const cloudFp = syncFingerprint(cloud);
     if (!localFp || !cloudFp) return;
     if (localFp === cloudFp) {
+      state.lastSyncedFp = localFp;
       hideSyncConflict();
       return;
     }
-    const localDirty = state.dirty ? "本機有未儲存變更，且" : "";
+    const baseline = state.lastSyncedFp || "";
+    // 雲端相對上次同步已變：即使本機只是查看也要提示
+    if (baseline && cloudFp !== baseline) {
+      showSyncConflict(
+        (state.dirty ? "本機有未儲存變更，且" : "") +
+        "雲端資料已更新（與上次同步不同）。若要保留此裝置的修改請按「儲存到雲端」；若要以雲端為準請按「重新載入雲端」。"
+      );
+      return;
+    }
+    // 本機未編輯：指紋差多半來自載入正規化／衍生欄位，不打擾
+    if (!state.dirty) {
+      if (!baseline) state.lastSyncedFp = cloudFp;
+      hideSyncConflict();
+      return;
+    }
     showSyncConflict(
-      localDirty + "雲端資料與目前網頁內容不同。若要保留此裝置的修改請按「儲存到雲端」；若要以雲端為準請按「重新載入雲端」。"
+      "本機有未儲存變更，且雲端資料與目前網頁內容不同。若要保留此裝置的修改請按「儲存到雲端」；若要以雲端為準請按「重新載入雲端」。"
     );
   } catch (e) {
     console.warn(e);
@@ -8200,6 +8257,7 @@ async function cloudPull() {
         ? ((DATA.nodes || []).length + " 層級項")
         : (DATA.equipment.length + " 台");
       saveLocal("已從雲端載入（" + nMsg + "）", { clearDirty: true });
+      rememberSyncedFingerprint(saved);
     }
     hideSyncConflict();
     render();
@@ -8255,6 +8313,7 @@ async function cloudPush() {
     await LineOneDrive.uploadJson(payload);
     localStorage.setItem(STORE_KEY, JSON.stringify(payload));
     state.dirty = false;
+    rememberSyncedFingerprint(payload);
     hideSyncConflict();
     updateCloudBar();
     const nMsg = isHierarchyArch()
