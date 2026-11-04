@@ -67,12 +67,69 @@
     box-sizing: border-box;
   }
   .top-stage-progress[hidden] { display: none !important; }
-  .top-stage-progress-inner {
-    display: flex; gap: 6px; height: 36px; align-items: stretch;
-    padding: 5px; border-radius: 12px;
+  .top-stage-progress-wrap {
     background: #fff;
     border: 1px solid var(--line);
     box-shadow: var(--shadow);
+    border-radius: 12px;
+    padding: 8px 10px 8px;
+  }
+  .top-stage-times {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    min-height: 22px;
+    margin: 0 2px 6px;
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .top-stage-times .t-start,
+  .top-stage-times .t-end {
+    z-index: 1;
+    white-space: nowrap;
+  }
+  .top-stage-times .t-start { text-align: left; }
+  .top-stage-times .t-end { text-align: right; }
+  .top-stage-times .t-today {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    transform: translateX(-50%);
+    z-index: 2;
+    color: #c0392b;
+    font-weight: 800;
+    white-space: nowrap;
+    text-align: center;
+    pointer-events: none;
+  }
+  .top-stage-times .t-today b,
+  .top-stage-times .t-start b,
+  .top-stage-times .t-end b {
+    font-weight: 800;
+    color: #16324a;
+  }
+  .top-stage-times .t-today b { color: #c0392b; }
+  .top-stage-progress-inner {
+    position: relative;
+    display: flex; gap: 6px; height: 36px; align-items: stretch;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+  }
+  .top-stage-today-line {
+    position: absolute;
+    top: -4px; bottom: -2px;
+    width: 2px;
+    background: #c0392b;
+    opacity: 0.85;
+    z-index: 3;
+    pointer-events: none;
+    transform: translateX(-50%);
+    border-radius: 1px;
   }
   .top-stage-bar {
     flex: 1 1 0; position: relative; border-radius: 7px; overflow: hidden; min-width: 0;
@@ -93,6 +150,7 @@
   @media (max-width: 900px) {
     .top-stage-progress-inner { height: 32px; gap: 4px; }
     .top-stage-bar .txt { font-size: 11px; }
+    .top-stage-times { font-size: 11px; min-height: 20px; }
   }
   header.top .page-ver {
     flex: 0 0 auto;
@@ -1976,7 +2034,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 116;
+const PAGE_BUILD = 117;
 const PAGE_DATE = "2026-11-04";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -4674,7 +4732,7 @@ function computeOverallStageSpans(eqList) {
   });
 }
 
-/** 頂欄：複製甘特整線各階段總進度（色條＋簡稱＋%） */
+/** 頂欄：複製甘特整線各階段總進度（色條＋簡稱＋%）＋開始／今天／完成時間 */
 function buildTopStageProgressHtml() {
   if (isProjectsOverview()) return "";
   if (!usesChecklistViews()) return "";
@@ -4684,6 +4742,29 @@ function buildTopStageProgressHtml() {
   const list = eqList.length ? eqList : (DATA.equipment || []);
   if (!list.length) return "";
   const spans = computeOverallStageSpans(list);
+  let rangeStart = null;
+  let rangeEnd = null;
+  spans.forEach(function (sp) {
+    if (!sp || sp.noRange || sp.start == null || sp.end == null) return;
+    if (rangeStart == null || sp.start < rangeStart) rangeStart = sp.start;
+    if (rangeEnd == null || sp.end > rangeEnd) rangeEnd = sp.end;
+  });
+  const todayMs = Date.parse(new Date().toISOString().slice(0, 10) + "T00:00:00");
+  const startLabel = rangeStart != null ? fmtAxisDate(rangeStart) : "—";
+  const endLabel = rangeEnd != null ? fmtAxisDate(rangeEnd) : "—";
+  const todayLabel = fmtAxisDate(todayMs);
+  let todayLeftPct = null;
+  if (rangeStart != null && rangeEnd != null && rangeEnd > rangeStart) {
+    const span = rangeEnd - rangeStart;
+    todayLeftPct = ((todayMs - rangeStart) / span) * 100;
+    todayLeftPct = Math.max(0, Math.min(100, todayLeftPct));
+  }
+  const todayStyle = todayLeftPct == null
+    ? ""
+    : ' style="left:' + todayLeftPct.toFixed(2) + '%"';
+  const todayLine = todayLeftPct == null
+    ? ""
+    : '<div class="top-stage-today-line" style="left:' + todayLeftPct.toFixed(2) + '%" title="今天"></div>';
   const cells = stages.map(function (s, si) {
     const sp = spans[si] || { pct: 0 };
     const pct = Math.max(0, Math.min(100, (Number(sp.pct) || 0) * 100));
@@ -4696,7 +4777,14 @@ function buildTopStageProgressHtml() {
       <div class="txt">${escapeHtml(txt)}</div>
     </div>`;
   }).join("");
-  return `<div class="top-stage-progress-inner" title="整線各階段總進度（與甘特圖同步）">${cells}</div>`;
+  return `<div class="top-stage-progress-wrap" title="整線各階段總進度（與甘特圖同步）">
+    <div class="top-stage-times">
+      <span class="t-start">開始時間 <b>${escapeHtml(startLabel)}</b></span>
+      <span class="t-today"${todayStyle}>今天 <b>${escapeHtml(todayLabel)}</b></span>
+      <span class="t-end">完成時間 <b>${escapeHtml(endLabel)}</b></span>
+    </div>
+    <div class="top-stage-progress-inner">${todayLine}${cells}</div>
+  </div>`;
 }
 
 function updateTopStageProgress() {
