@@ -2034,7 +2034,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 117;
+const PAGE_BUILD = 118;
 const PAGE_DATE = "2026-11-04";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -5644,20 +5644,6 @@ function renderWeekly() {
     renderHierarchyWeekly();
     return;
   }
-  const groups = DATA.segOrder.map(seg => {
-    const eqs = DATA.equipment.filter(eq => eq.seg === seg);
-    const items = eqs.flatMap(prepItems);
-    const mile = (DATA.milestones.find(m => m.seg === seg) || {}).dates || [];
-    return { seg, count: eqs.length, ratio: ratioOf(items), high: highOpen(items), due: mile[0] || "" };
-  });
-  const cls = { "板階段": "seg-board", "組裝段": "seg-assy", "測試段": "seg-test" };
-  const cards = groups.map(g => `<article class="card ${cls[g.seg] || ""}">
-      <h2>${g.seg}</h2>
-      <div class="meta"><span>${g.count} 台設備</span><span>高急迫 ${g.high}</span></div>
-      <div class="pct ${pctClass(g.ratio)}" style="font-size:28px">${pctText(g.ratio)}</div>
-      ${barHtml(g.ratio)}
-      <div class="meta" style="margin-top:8px"><span>預計完成</span><span>${g.due || "-"}</span></div>
-    </article>`).join("");
   const tops = DATA.segOrder.map((seg, i) => {
     const hit = DATA.equipment.filter(eq => eq.seg === seg)
       .flatMap(eq => prepItems(eq).map(it => ({ eq, it })))
@@ -5691,7 +5677,6 @@ function renderWeekly() {
     projectName: (state.project && state.project.name) || ""
   });
   document.getElementById("weekly").innerHTML = `
-    <div class="cards">${cards}</div>
     ${cloudBarHtml()}
     ${mainPanel}
     ${updatesHtml}
@@ -8084,25 +8069,8 @@ function patchEqField(eqIdx, field, raw) {
       title.textContent = (eq.idx || "") + ". " + (eq.name || "未命名");
     }
   });
-  // refresh summary cards without nuking focused input
-  const cardsHost = document.querySelector("#weekly .cards");
-  if (cardsHost && document.activeElement && document.activeElement.closest("[data-eq-idx]")) {
-    const groups = DATA.segOrder.map(seg => {
-      const eqs = DATA.equipment.filter(e => e.seg === seg);
-      const items = eqs.flatMap(prepItems);
-      const mile = (DATA.milestones.find(m => m.seg === seg) || {}).dates || [];
-      return { seg, count: eqs.length, ratio: ratioOf(items), high: highOpen(items), due: mile[0] || "" };
-    });
-    const cls = { "板階段": "seg-board", "組裝段": "seg-assy", "測試段": "seg-test" };
-    cardsHost.innerHTML = groups.map(g => `<article class="card ${cls[g.seg] || ""}">
-      <h2>${g.seg}</h2>
-      <div class="meta"><span>${g.count} 台設備</span><span>高急迫 ${g.high}</span></div>
-      <div class="pct ${pctClass(g.ratio)}" style="font-size:28px">${pctText(g.ratio)}</div>
-      ${barHtml(g.ratio)}
-      <div class="meta" style="margin-top:8px"><span>預計完成</span><span>${g.due || "-"}</span></div>
-    </article>`).join("");
-  }
 }
+
 
 function patchItemField(itemIdx, field, raw) {
   const eq = DATA.equipment[state.eq];
