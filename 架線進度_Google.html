@@ -1969,7 +1969,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 112;
+const PAGE_BUILD = 113;
 const PAGE_DATE = "2026-11-04";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -2969,6 +2969,30 @@ function titleBelongsToProject(title, projName) {
   // VIVO R01 舊標題相容（TW1_VIVO_R01…）
   if (/^vivo\s*r0?1$/i.test(n) && /VIVO[_\s-]?R0?1|TW1_VIVO_R01/i.test(t)) return true;
   return false;
+}
+
+
+/** 依目前專案階段重寫副標中的「階段：…」，與 KPI／甘特一致 */
+function stageListLabel() {
+  return (DATA.stages || []).map(function (s) {
+    return String((s && (s.mark || s.name)) || "").trim();
+  }).filter(Boolean);
+}
+
+function refreshSubtitleFromStages() {
+  if (isProjectsOverview()) return;
+  const names = stageListLabel();
+  if (!names.length) return;
+  const part = "階段：" + names.join("／");
+  let sub = String(DATA.subtitle || "");
+  if (/階段[：:]/.test(sub)) {
+    sub = sub.replace(/階段[：:][^｜|]*/u, part);
+  } else if (sub.trim()) {
+    sub = sub.replace(/\s*$/, "") + "　｜　" + part;
+  } else {
+    sub = part;
+  }
+  DATA.subtitle = sub;
 }
 
 function syncTitleToProject(proj) {
@@ -4414,22 +4438,26 @@ function renderKpis() {
   }
   if (isProjectsOverview()) {
     const snaps = state.overviewSnapshots || [];
-    let eqN = 0, high = 0, delay = 0, prepItemsAll = [];
+    let eqN = 0, high = 0, delay = 0, allItems = [];
     snaps.forEach(s => {
       eqN += (s.equipment || []).length;
       (s.equipment || []).forEach(eq => {
-        prepItemsAll = prepItemsAll.concat(snapPrepItems(eq));
         (eq.stages || []).forEach(st => {
-          (st.items || []).forEach(it => { if (it.status === "延誤中") delay++; });
+          (st.items || []).forEach(it => {
+            allItems.push(it);
+            if (it.status === "延誤中") delay++;
+          });
         });
       });
-      high += highOpen((s.equipment || []).flatMap(snapPrepItems));
+      high += highOpen((s.equipment || []).flatMap(function (eq) {
+        return (eq.stages || []).flatMap(function (st) { return st.items || []; });
+      }));
     });
-    const ratio = ratioOf(prepItemsAll);
+    const ratio = ratioOf(allItems);
     const cards = [
       { label: "專案數", value: String(snaps.length), sub: snaps.map(s => s.name).join("、") || "—" },
       { label: "設備數（全部）", value: String(eqN), sub: "各專案合計" },
-      { label: "架線前準備完成率", value: pctText(ratio), sub: "全部專案細項平均" },
+      { label: "所有階段完成率", value: pctText(ratio), sub: "全部專案細項平均" },
       { label: "高急迫／延誤", value: high + " / " + delay, sub: "高急迫未完成 / 延誤中細項" }
     ];
     document.getElementById("kpis").innerHTML = cards.map(c =>
@@ -4437,20 +4465,22 @@ function renderKpis() {
     ).join("");
     return;
   }
-  const allPrep = DATA.equipment.flatMap(prepItems);
-  const ratio = ratioOf(allPrep);
-  const high = highOpen(allPrep);
+  const allItems = DATA.equipment.flatMap(function (eq) { return activeItemsOf(eq); });
+  const ratio = ratioOf(allItems);
+  const high = highOpen(allItems);
   const delayInfo = stageDelayCounts();
   const delay = delayInfo.total;
+  const stageN = (DATA.stages || []).length;
+  const stageNames = stageListLabel().join("／") || ("共 " + stageN + " 階");
   const segCounts = DATA.segOrder.map(seg => `${seg} ${DATA.equipment.filter(eq => eq.seg === seg).length}`).join("　");
   const delayBreak = delayInfo.counts.map(s =>
     `<span class="${s.count > 0 ? "hot" : ""}">${escapeHtml(s.mark)} <b>${s.count}</b></span>`
   ).join("") + `<span>總計 <b>${delay}</b></span>`;
   const cards = [
     { label: "設備數", value: String(DATA.equipment.length), sub: segCounts },
-    { label: "架線前準備完成率", value: pctText(ratio), sub: "依細項平均，與報表公式相同" },
-    { label: "高急迫未完成", value: String(high), sub: "架線前準備，狀態不是已完成" },
-    { label: "五階段延誤項", value: String(delay), sub: "狀態為延誤中的細項", extra: `<div class="delay-break">${delayBreak}</div>` }
+    { label: "所有階段完成率", value: pctText(ratio), sub: "依細項平均（" + escapeHtml(stageNames) + "）" },
+    { label: "高急迫未完成", value: String(high), sub: "所有階段，狀態不是已完成" },
+    { label: "所有階段延誤項", value: String(delay), sub: "狀態為延誤中的細項", extra: `<div class="delay-break">${delayBreak}</div>` }
   ];
   document.getElementById("kpis").innerHTML = cards.map(c =>
     `<article class="kpi"><div class="label">${c.label}</div><div class="value">${c.value}</div><div class="sub">${c.sub}</div>${c.extra || ""}</article>`
@@ -4565,7 +4595,7 @@ function ganttBarHtml(st, text, title) {
 }
 
 
-/** 可見設備各階段彙總：時段＋平均完成率（與甘特「整線五階段」同一算法） */
+/** 可見設備各階段彙總：時段＋平均完成率（與甘特「整線／所有階段」同一算法） */
 function computeOverallStageSpans(eqList) {
   const list = Array.isArray(eqList) ? eqList : visibleEq();
   return (DATA.stages || []).map(function (_s, si) {
@@ -4754,7 +4784,7 @@ function renderLineGanttHtml() {
       <div class="gantt-meta-h">OWNER</div>
       <div class="gantt-axis">${todayAxisHtml}${axisMarks.join("")}</div>
       <div class="gantt-seg-rail empty"></div>
-      <div class="gantt-label overall">整線（五階段）</div>
+      <div class="gantt-label overall">整線（所有階段）</div>
       <div class="gantt-meta"><span class="pct ${pctClass(overallRatio)}">${pctText(overallRatio)}</span></div>
       <div class="gantt-meta"><span class="s-${overallStatus}">${escapeHtml(overallStatus)}</span></div>
       <div class="gantt-meta ${overallDelay ? "delay-hot" : ""}">${overallDelay}</div>
@@ -6310,6 +6340,7 @@ function render() {
     DATA.subtitle = "各專案報表摘要＋合併總表（點左側專案可進入單案編輯）";
     if (state.tab !== "weekly") state.tab = "weekly";
   }
+  refreshSubtitleFromStages();
   document.getElementById("title").textContent = DATA.title;
   document.getElementById("subtitle").textContent = DATA.subtitle;
   updateTopStageProgress();
