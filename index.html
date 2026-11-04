@@ -1266,6 +1266,11 @@
   .settings-panel h2 { margin: 0 0 6px; font-size: 17px; }
   .settings-panel .hint { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
   .settings-panel.full { grid-column: 1 / -1; }
+  .edit-table input.owner-input {
+    width: 100%; min-width: 72px; max-width: 120px;
+    box-sizing: border-box; padding: 6px 8px;
+    border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 13px;
+  }
   .edit-table th.stage-on-h,
   .edit-table td.stage-on-c {
     text-align: center;
@@ -1969,7 +1974,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 114;
+const PAGE_BUILD = 115;
 const PAGE_DATE = "2026-11-04";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -2693,18 +2698,7 @@ function blankProjectPayload(name) {
     { key: "stage2", name: "階段2", mark: "階2" }
   ];
   const blankItem = function () {
-    return {
-      item: "01. 新項目",
-      pct: 0,
-      urg: "中",
-      start: "",
-      due: "",
-      actual: "",
-      status: "未開始",
-      note: "",
-      photos: [],
-      progressLog: []
-    };
+    return newTodoItem(null, { item: "01. 新項目", owner: "" });
   };
   const equipment = [{
     idx: "1",
@@ -3659,10 +3653,37 @@ function applySavedEquipment(saved) {
   return !!applyProjectPayload(saved);
 }
 
+
+/** 細項預設負責人＝設備 Owner（可再改） */
+function defaultItemOwner(eq) {
+  const o = eq && eq.owner != null ? String(eq.owner).trim() : "";
+  return o && o !== "-" ? o : "";
+}
+
+function newTodoItem(eq, overrides) {
+  const o = overrides || {};
+  const owner = Object.prototype.hasOwnProperty.call(o, "owner")
+    ? String(o.owner == null ? "" : o.owner).trim()
+    : defaultItemOwner(eq);
+  return {
+    item: o.item != null ? o.item : "01. 新項目",
+    pct: o.pct != null ? o.pct : 0,
+    urg: o.urg || "中",
+    start: o.start || "",
+    due: o.due || "",
+    actual: o.actual || "",
+    status: o.status || "未開始",
+    owner: owner,
+    note: o.note || "",
+    photos: Array.isArray(o.photos) ? o.photos : [],
+    progressLog: Array.isArray(o.progressLog) ? o.progressLog : []
+  };
+}
+
 function blankStageBlock(due) {
   return {
     due: due || "",
-    items: [{ item: "01. 新項目", pct: 0, urg: "中", start: "", due: due || "", actual: "", status: "未開始", note: "", photos: [], progressLog: [] }]
+    items: [newTodoItem(null, { item: "01. 新項目", due: due || "", owner: "" })]
   };
 }
 
@@ -3705,6 +3726,10 @@ function normalizeStructure() {
     eq.stages.forEach((st, si) => {
       if (!st || typeof st !== "object") eq.stages[si] = blankStageBlock("");
       if (!Array.isArray(eq.stages[si].items)) eq.stages[si].items = blankStageBlock("").items;
+      eq.stages[si].items.forEach(function (it) {
+        if (!it || typeof it !== "object") return;
+        if (it.owner == null) it.owner = "";
+      });
     });
     ensureStageOn(eq);
   });
@@ -4357,7 +4382,7 @@ function matchQuery(eq) {
   const q = state.q.trim().toLowerCase();
   if (!q) return true;
   const blob = [eq.idx, eq.seg, eq.name, eq.pm, eq.owner]
-    .concat(eq.stages.flatMap(st => st.items.map(it => it.item)))
+    .concat(eq.stages.flatMap(st => st.items.map(it => (it.item || "") + " " + (it.owner || ""))))
     .join(" ").toLowerCase();
   return blob.includes(q);
 }
@@ -4832,6 +4857,7 @@ function defaultStagesFrom(template) {
         due: st.due || it.due || "",
         actual: "",
         status: "未開始",
+        owner: it.owner || "",
         note: "",
         photos: [],
         progressLog: []
@@ -4840,7 +4866,7 @@ function defaultStagesFrom(template) {
   }
   return DATA.stages.map(() => ({
     due: "",
-    items: [{ item: "01. 新項目", pct: 0, urg: "中", start: "", due: "", actual: "", status: "未開始", note: "", photos: [], progressLog: [] }]
+    items: [newTodoItem(null, { item: "01. 新項目", owner: "" })]
   }));
 }
 function nextEqIdx() {
@@ -6068,6 +6094,7 @@ function buildItemsDetailHtml(eq) {
       <td style="min-width:110px" class="bar-cell">${barHtml(r)}</td>
       <td><input type="number" class="pct-input ${pctClass(r)}" data-field="pct" min="0" max="100" step="0.1" value="${(r * 100).toFixed(1)}"></td>
       <td><select class="u-${it.urg}" data-field="urg">${optionHtml(URG_OPTS, it.urg || "中")}</select></td>
+      <td><input type="text" class="owner-input" data-field="owner" data-item-idx="${idx}" value="${escapeAttr(it.owner || "")}" placeholder="${escapeAttr(defaultItemOwner(eq) || "負責人")}" title="負責人（新增時預設為設備 Owner）"></td>
       <td class="date-cell">
         <button type="button" class="date-hit ${datesOpen ? "open" : ""} ${dueText ? "" : "empty"}" data-toggle-dates="${idx}" title="點擊設定開始／完成／實際時間">${dueText ? escapeHtml(dueText) : "設定日期"}</button>
         <div class="date-drop ${datesOpen ? "open" : ""}" data-dates-for="${idx}">
@@ -6087,7 +6114,7 @@ function buildItemsDetailHtml(eq) {
       </td>
     </tr>
     <tr class="remark-row ${open ? "" : "hidden"}" data-remark-for="${idx}">
-      <td colspan="8">
+      <td colspan="9">
         <div class="remark-box">
           ${progressLogHtml(it, idx)}
           <label>事項名稱</label>
@@ -6107,6 +6134,7 @@ function buildItemsDetailHtml(eq) {
       </div>
       <div class="m-field"><label>完成率</label><div>${barHtml(r)}<input type="number" class="pct-input ${pctClass(r)}" data-field="pct" min="0" max="100" step="0.1" value="${(r * 100).toFixed(1)}" style="margin-top:8px"></div></div>
       <div class="m-field"><label>急迫性</label><select class="u-${it.urg}" data-field="urg">${optionHtml(URG_OPTS, it.urg || "中")}</select></div>
+      <div class="m-field"><label>負責人</label><input type="text" class="owner-input" data-field="owner" data-item-idx="${idx}" value="${escapeAttr(it.owner || "")}" placeholder="${escapeAttr(defaultItemOwner(eq) || "負責人")}"></div>
       <div class="m-field"><label>日期</label><div class="date-cell">
         <button type="button" class="date-hit ${datesOpen ? "open" : ""} ${dueText ? "" : "empty"}" data-toggle-dates="${idx}">${dueText ? escapeHtml(dueText) : "設定日期"}</button>
         <div class="date-drop ${datesOpen ? "open" : ""}" data-dates-for="${idx}">
@@ -6136,7 +6164,7 @@ function buildItemsDetailHtml(eq) {
     </article>`;
     return { row, card };
   });
-  const itemRows = itemBlocks.map(x => x.row).join("") || `<tr><td colspan="8">此階段沒有符合的細項，可按「新增項目」</td></tr>`;
+  const itemRows = itemBlocks.map(x => x.row).join("") || `<tr><td colspan="9">此階段沒有符合的細項，可按「新增項目」</td></tr>`;
   const itemCards = itemBlocks.map(x => x.card).join("") || `<p class="note">此階段沒有符合的細項，可按「新增項目」</p>`;
   const minis = eq.stages.map((st, si) => {
     if (!isStageOn(eq, si)) return "";
@@ -6156,7 +6184,7 @@ function buildItemsDetailHtml(eq) {
         <div class="desktop-table"><table class="edit-table">
           <thead><tr>
             <th style="min-width:220px">待完成事項</th><th>完成率</th><th></th>
-            <th>急迫性</th><th>預計完成</th><th>狀態</th><th>附件</th><th></th>
+            <th>急迫性</th><th>負責人</th><th>預計完成</th><th>狀態</th><th>附件</th><th></th>
           </tr></thead>
           <tbody>${itemRows}</tbody>
         </table></div>
@@ -7026,18 +7054,11 @@ function addStageRecAsTodo(eqIdx, stageSi, text, kind) {
   const n = items.length + 1;
   const raw = String(text || "").replace(/\s+/g, " ").trim() || "新項目";
   const title = String(n).padStart(2, "0") + ". " + raw.slice(0, 120);
-  items.push({
+  items.push(newTodoItem(eq, {
     item: title,
-    pct: 0,
-    urg: "中",
-    start: "",
     due: items[0] && items[0].due ? items[0].due : "",
-    actual: "",
-    status: "未開始",
-    note: kind ? ("來源：" + kind) : "",
-    photos: [],
-    progressLog: []
-  });
+    note: kind ? ("來源：" + kind) : ""
+  }));
   syncStageDue(eq, stageSi);
   state.eq = eqIdx;
   state.stage = stageSi;
@@ -7629,6 +7650,7 @@ function flattenExportRows() {
           pm: eq.pm || "",
           stage: stageName,
           item: it.item || "",
+          itemOwner: it.owner || "",
           pct: ((Number(it.pct) || 0) * 100).toFixed(1) + "%",
           urg: it.urg || "",
           start: it.start || "",
@@ -8004,6 +8026,7 @@ function patchItemField(itemIdx, field, raw) {
     syncItemStatusFromPct(it, it.pct);
   }
   if (field === "urg") it.urg = URG_OPTS.includes(raw) ? raw : "中";
+  if (field === "owner") it.owner = String(raw || "").trim();
   if (field === "status") it.status = STATUS_OPTS.includes(raw) ? raw : "未開始";
   if (field === "start") it.start = fromDateInput(raw);
   if (field === "due") {
@@ -8784,20 +8807,13 @@ document.body.addEventListener("click", ev => {
     }
   }
   if (ev.target.closest("[data-add-item]")) {
-    const items = DATA.equipment[state.eq].stages[state.stage].items;
+    const eq = DATA.equipment[state.eq];
+    const items = eq.stages[state.stage].items;
     const n = items.length + 1;
-    items.push({
+    items.push(newTodoItem(eq, {
       item: String(n).padStart(2, "0") + ". 新項目",
-      pct: 0,
-      urg: "中",
-      start: "",
-      due: items[0] && items[0].due ? items[0].due : "",
-      actual: "",
-      status: "未開始",
-      note: "",
-      photos: [],
-      progressLog: []
-    });
+      due: items[0] && items[0].due ? items[0].due : ""
+    }));
     syncStageDue(DATA.equipment[state.eq], state.stage);
     state.onlyHigh = false;
     state.openRemark = items.length - 1;
