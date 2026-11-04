@@ -1434,6 +1434,122 @@
     });
   }
 
+  function renameDriveFile(fileId, newName) {
+    if (!fileId) return Promise.resolve(null);
+    return withScopeRetry(function () {
+      return driveFetch(
+        "https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) +
+        "?supportsAllDrives=true&fields=id,name",
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: String(newName || "").trim() || "專案" })
+        }
+      ).then(function (res) {
+        if (!res.ok) {
+          return res.text().then(function (t) {
+            throw new Error("重新命名雲端資料夾失敗 " + res.status + " " + t);
+          });
+        }
+        return res.json();
+      });
+    });
+  }
+
+  /** 重新命名專案（保留 id；同步改 Drive 資料夾名與 projects index） */
+  function renameProject(projectId, newName, opts) {
+    opts = opts || {};
+    const id = String(projectId || "");
+    const label = String(newName || "").trim();
+    if (!id) return Promise.reject(new Error("缺少專案 ID"));
+    if (!label) return Promise.reject(new Error("請輸入專案名稱"));
+    const newFolder = sanitizeProjectFolderName(label);
+    return ensureInit()
+      .then(function () {
+        if (!state.account) return login();
+      })
+      .then(function () {
+        return readProjectsIndexRaw();
+      })
+      .then(function (raw) {
+        let list = (raw && raw.list) || [];
+        if (Array.isArray(opts.knownList) && opts.knownList.length) {
+          list = mergeProjectLists(list, opts.knownList);
+        }
+        let hit = list.find(function (p) { return p && String(p.id) === id; });
+        if (!hit && activeProject && String(activeProject.id) === id) {
+          hit = normalizeProjectRecord(activeProject);
+        }
+        if (!hit && opts.fallbackProject) {
+          hit = normalizeProjectRecord(opts.fallbackProject);
+        }
+        if (!hit) throw new Error("找不到要重新命名的專案");
+        const oldName = String(hit.name || "");
+        if (String(oldName) === label) {
+          return { project: hit, oldName: oldName, list: list, unchanged: true };
+        }
+        if (list.some(function (p) {
+          return p && String(p.id) !== id && normFolderKey(p.name) === normFolderKey(label);
+        })) {
+          throw new Error("專案名稱已存在");
+        }
+        const oldFolder = sanitizeProjectFolderName(oldName);
+        const key = projCacheKey(hit);
+        return ensureProjectsRootId().then(function (rootId) {
+          const cached = String(hit.folderId || (key && folderIdByProject[key]) || "").trim();
+          const findId = cached
+            ? Promise.resolve(cached)
+            : listChildFolders(rootId, { bypassCache: true }).then(function (folders) {
+                const want = normFolderKey(oldName);
+                const m = (folders || []).find(function (f) {
+                  return normFolderKey(f.name) === want || f.name === oldFolder;
+                });
+                return (m && m.id) || "";
+              });
+          return findId.then(function (folderId) {
+            const needRenameFolder = !!(folderId && oldFolder !== newFolder);
+            const doRename = needRenameFolder
+              ? renameDriveFile(folderId, newFolder)
+              : Promise.resolve(null);
+            return doRename.then(function () {
+              const updated = normalizeProjectRecord(Object.assign({}, hit, {
+                name: label,
+                folderId: folderId || hit.folderId || "",
+                spreadsheetId: hit.spreadsheetId || ""
+              }));
+              updated.id = hit.id; // 保留穩定 id
+              updated.folderPath = projectsRootParts().concat([newFolder]).join("/");
+              let found = false;
+              const next = list.map(function (p) {
+                if (p && String(p.id) === id) {
+                  found = true;
+                  return updated;
+                }
+                return p;
+              });
+              if (!found) next.push(updated);
+              return saveProjectsIndex(next).then(function () {
+                if (folderId) folderIdByProject[projCacheKey(updated)] = folderId;
+                try {
+                  const root = sharedProjectsRootId() || "";
+                  if (root) delete childFolderListCache[root];
+                  delete childFolderListCache["root"];
+                } catch (e) {}
+                if (activeProject && String(activeProject.id) === id) {
+                  setActiveProject(updated);
+                  if (folderId) {
+                    cachedFolderId = folderId;
+                    rememberActiveFolderId(folderId);
+                  }
+                }
+                return { project: updated, oldName: oldName, list: next, unchanged: false };
+              });
+            });
+          });
+        });
+      });
+  }
+
   function uniqueProjectName(base, list) {
     const names = {};
     (list || []).forEach(function (p) { names[String(p.name || "")] = true; });
@@ -2792,6 +2908,7 @@
         });
     },
     createProject: createProject,
+    renameProject: renameProject,
     deleteProject: deleteProject,
     duplicateProject: duplicateProject,
     uniqueProjectName: uniqueProjectName,
