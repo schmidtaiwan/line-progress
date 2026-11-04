@@ -61,36 +61,38 @@
   header.top .top-row {
     display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
   }
-  header.top .top-stage-progress {
-    flex: 1 1 260px;
-    min-width: 180px;
-    max-width: 680px;
+  .top-stage-progress {
+    margin: 0 0 12px;
+    width: 100%;
+    box-sizing: border-box;
   }
-  header.top .top-stage-progress[hidden] { display: none !important; }
-  header.top .top-stage-progress-inner {
-    display: flex; gap: 4px; height: 30px; align-items: stretch;
-    padding: 3px; border-radius: 8px;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.14);
+  .top-stage-progress[hidden] { display: none !important; }
+  .top-stage-progress-inner {
+    display: flex; gap: 6px; height: 36px; align-items: stretch;
+    padding: 5px; border-radius: 12px;
+    background: #fff;
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
   }
-  header.top .top-stage-bar {
-    flex: 1 1 0; position: relative; border-radius: 5px; overflow: hidden; min-width: 0;
-    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.12);
+  .top-stage-bar {
+    flex: 1 1 0; position: relative; border-radius: 7px; overflow: hidden; min-width: 0;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10);
   }
-  header.top .top-stage-bar .fill {
+  .top-stage-bar .fill {
     position: absolute; left: 0; top: 0; bottom: 0;
     background: rgba(255,255,255,0.35);
   }
-  header.top .top-stage-bar .txt {
+  .top-stage-bar .txt {
     position: relative; z-index: 1;
     display: flex; align-items: center; justify-content: center;
     height: 100%;
-    font-size: 11px; font-weight: 700; color: #fff;
+    font-size: 12px; font-weight: 700; color: #fff;
     text-shadow: 0 1px 1px rgba(0,0,0,0.35);
-    white-space: nowrap; padding: 0 2px; pointer-events: none;
+    white-space: nowrap; padding: 0 4px; pointer-events: none;
   }
   @media (max-width: 900px) {
-    header.top .top-stage-progress { flex-basis: 100%; max-width: none; order: 3; }
+    .top-stage-progress-inner { height: 32px; gap: 4px; }
+    .top-stage-bar .txt { font-size: 11px; }
   }
   header.top .page-ver {
     flex: 0 0 auto;
@@ -1838,7 +1840,6 @@
 <header class="top">
   <div class="top-row">
   <h1 id="title"></h1>
-    <div class="top-stage-progress" id="topStageProgress" hidden aria-label="整線各階段總進度"></div>
     <div class="top-right">
       <span class="page-ver" id="pageVer">版次 —</span>
       <div class="top-actions">
@@ -1873,6 +1874,7 @@
   </nav>
 </header>
 <main>
+  <div class="top-stage-progress" id="topStageProgress" hidden aria-label="整線各階段總進度"></div>
   <section class="kpis" id="kpis"></section>
   <section id="weekly"></section>
   <section id="overview" class="hidden"></section>
@@ -1974,7 +1976,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 115;
+const PAGE_BUILD = 116;
 const PAGE_DATE = "2026-11-04";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -6413,6 +6415,8 @@ function render() {
   document.querySelector("main").classList.toggle("map-wide", state.tab === "map" || state.tab === "sheets");
   const showKpi = state.tab !== "map" && state.tab !== "settings" && state.tab !== "sheets";
   document.getElementById("kpis").classList.toggle("hidden", !showKpi);
+  const topProgEl = document.getElementById("topStageProgress");
+  if (topProgEl) topProgEl.classList.toggle("hidden", !showKpi || isProjectsOverview());
   if (showKpi) renderKpis();
   if (state.tab === "weekly") renderWeekly();
   if (state.tab === "overview") {
