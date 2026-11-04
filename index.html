@@ -1969,7 +1969,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 113;
+const PAGE_BUILD = 114;
 const PAGE_DATE = "2026-11-04";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -4417,6 +4417,18 @@ function stageDelayCounts() {
   return { counts, total };
 }
 
+
+/** 設備種類數與台數（qty 合計） */
+function equipmentCountSummary(eqList) {
+  const list = Array.isArray(eqList) ? eqList : (DATA.equipment || []);
+  const kinds = list.length;
+  let units = 0;
+  list.forEach(function (eq) {
+    units += qtyNumber(eq && eq.qty);
+  });
+  return { kinds: kinds, units: units, label: kinds + "種共" + units + "台" };
+}
+
 function renderKpis() {
   if (isHierarchyArch()) {
     rollupHierarchyPct();
@@ -4438,9 +4450,11 @@ function renderKpis() {
   }
   if (isProjectsOverview()) {
     const snaps = state.overviewSnapshots || [];
-    let eqN = 0, high = 0, delay = 0, allItems = [];
+    let eqKinds = 0, eqUnits = 0, high = 0, delay = 0, allItems = [];
     snaps.forEach(s => {
-      eqN += (s.equipment || []).length;
+      const sum = equipmentCountSummary(s.equipment || []);
+      eqKinds += sum.kinds;
+      eqUnits += sum.units;
       (s.equipment || []).forEach(eq => {
         (eq.stages || []).forEach(st => {
           (st.items || []).forEach(it => {
@@ -4456,7 +4470,7 @@ function renderKpis() {
     const ratio = ratioOf(allItems);
     const cards = [
       { label: "專案數", value: String(snaps.length), sub: snaps.map(s => s.name).join("、") || "—" },
-      { label: "設備數（全部）", value: String(eqN), sub: "各專案合計" },
+      { label: "設備數（全部）", value: eqKinds + "種共" + eqUnits + "台", sub: "各專案合計（種類／台數）" },
       { label: "所有階段完成率", value: pctText(ratio), sub: "全部專案細項平均" },
       { label: "高急迫／延誤", value: high + " / " + delay, sub: "高急迫未完成 / 延誤中細項" }
     ];
@@ -4472,12 +4486,17 @@ function renderKpis() {
   const delay = delayInfo.total;
   const stageN = (DATA.stages || []).length;
   const stageNames = stageListLabel().join("／") || ("共 " + stageN + " 階");
-  const segCounts = DATA.segOrder.map(seg => `${seg} ${DATA.equipment.filter(eq => eq.seg === seg).length}`).join("　");
+  const eqSum = equipmentCountSummary(DATA.equipment);
+  const segCounts = DATA.segOrder.map(seg => {
+    const eqs = DATA.equipment.filter(eq => eq.seg === seg);
+    const s = equipmentCountSummary(eqs);
+    return seg + " " + s.kinds + "種/" + s.units + "台";
+  }).join("　");
   const delayBreak = delayInfo.counts.map(s =>
     `<span class="${s.count > 0 ? "hot" : ""}">${escapeHtml(s.mark)} <b>${s.count}</b></span>`
   ).join("") + `<span>總計 <b>${delay}</b></span>`;
   const cards = [
-    { label: "設備數", value: String(DATA.equipment.length), sub: segCounts },
+    { label: "設備數", value: eqSum.label, sub: segCounts || (eqSum.kinds + "種設備，合計 " + eqSum.units + " 台") },
     { label: "所有階段完成率", value: pctText(ratio), sub: "依細項平均（" + escapeHtml(stageNames) + "）" },
     { label: "高急迫未完成", value: String(high), sub: "所有階段，狀態不是已完成" },
     { label: "所有階段延誤項", value: String(delay), sub: "狀態為延誤中的細項", extra: `<div class="delay-break">${delayBreak}</div>` }
