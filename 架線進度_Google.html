@@ -59,7 +59,38 @@
   }
   header.top h1 { margin: 0; font-size: 23px; font-weight: 650; letter-spacing: 0.2px; }
   header.top .top-row {
-    display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  header.top .top-stage-progress {
+    flex: 1 1 260px;
+    min-width: 180px;
+    max-width: 680px;
+  }
+  header.top .top-stage-progress[hidden] { display: none !important; }
+  header.top .top-stage-progress-inner {
+    display: flex; gap: 4px; height: 30px; align-items: stretch;
+    padding: 3px; border-radius: 8px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14);
+  }
+  header.top .top-stage-bar {
+    flex: 1 1 0; position: relative; border-radius: 5px; overflow: hidden; min-width: 0;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.12);
+  }
+  header.top .top-stage-bar .fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: rgba(255,255,255,0.35);
+  }
+  header.top .top-stage-bar .txt {
+    position: relative; z-index: 1;
+    display: flex; align-items: center; justify-content: center;
+    height: 100%;
+    font-size: 11px; font-weight: 700; color: #fff;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.35);
+    white-space: nowrap; padding: 0 2px; pointer-events: none;
+  }
+  @media (max-width: 900px) {
+    header.top .top-stage-progress { flex-basis: 100%; max-width: none; order: 3; }
   }
   header.top .page-ver {
     flex: 0 0 auto;
@@ -1802,6 +1833,7 @@
 <header class="top">
   <div class="top-row">
   <h1 id="title"></h1>
+    <div class="top-stage-progress" id="topStageProgress" hidden aria-label="整線各階段總進度"></div>
     <div class="top-right">
       <span class="page-ver" id="pageVer">版次 —</span>
       <div class="top-actions">
@@ -1937,8 +1969,8 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 111;
-const PAGE_DATE = "2026-11-03";
+const PAGE_BUILD = 112;
+const PAGE_DATE = "2026-11-04";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
 const FILE_ACCEPT = ".txt,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.pdf,.zip,.7z,.rar,.msg,.eml,application/*,text/*";
@@ -4198,6 +4230,9 @@ function stopBootLoadUI() {
 function prepareLockedShell() {
   document.body.classList.add("locked");
   document.getElementById("title").textContent = "";
+  const topProg = document.getElementById("topStageProgress");
+  if (topProg) { topProg.innerHTML = ""; topProg.setAttribute("hidden", ""); }
+
   document.getElementById("subtitle").textContent = "";
   const verGate = document.getElementById("pageVer");
   if (verGate) verGate.textContent = "版次 " + PAGE_VERSION;
@@ -4529,6 +4564,74 @@ function ganttBarHtml(st, text, title) {
   </div>`;
 }
 
+
+/** 可見設備各階段彙總：時段＋平均完成率（與甘特「整線五階段」同一算法） */
+function computeOverallStageSpans(eqList) {
+  const list = Array.isArray(eqList) ? eqList : visibleEq();
+  return (DATA.stages || []).map(function (_s, si) {
+    let start = null;
+    let end = null;
+    let pctSum = 0;
+    let pctN = 0;
+    list.forEach(function (eq) {
+      const sp = stageSpanForEq(eq, si);
+      if (!sp) return;
+      if (start == null || sp.start < start) start = sp.start;
+      if (end == null || sp.end > end) end = sp.end;
+      pctSum += sp.pct || 0;
+      pctN += 1;
+    });
+    if (start == null || end == null) {
+      // 無時程時仍顯示勾選該階段的設備平均完成率
+      pctSum = 0;
+      pctN = 0;
+      list.forEach(function (eq) {
+        if (!isStageOn(eq, si)) return;
+        const st = eq.stages && eq.stages[si];
+        const items = (st && st.items) || [];
+        pctSum += ratioOf(items);
+        pctN += 1;
+      });
+      return { start: null, end: null, pct: pctN ? pctSum / pctN : 0, noRange: true };
+    }
+    return { start: start, end: end, pct: pctN ? pctSum / pctN : 0 };
+  });
+}
+
+/** 頂欄：複製甘特整線各階段總進度（色條＋簡稱＋%） */
+function buildTopStageProgressHtml() {
+  if (isProjectsOverview()) return "";
+  if (!usesChecklistViews()) return "";
+  const stages = DATA.stages || [];
+  if (!stages.length) return "";
+  const eqList = visibleEq();
+  const list = eqList.length ? eqList : (DATA.equipment || []);
+  if (!list.length) return "";
+  const spans = computeOverallStageSpans(list);
+  const cells = stages.map(function (s, si) {
+    const sp = spans[si] || { pct: 0 };
+    const pct = Math.max(0, Math.min(100, (Number(sp.pct) || 0) * 100));
+    const color = STAGE_BAR_COLORS[si % STAGE_BAR_COLORS.length];
+    const label = String(s.mark || s.name || "").slice(0, 2);
+    const txt = label + " " + pct.toFixed(0) + "%";
+    const title = String(s.name || s.mark || "") + " " + pct.toFixed(0) + "%";
+    return `<div class="top-stage-bar" style="background:${color}" title="${escapeAttr(title)}">
+      <div class="fill" style="width:${pct}%"></div>
+      <div class="txt">${escapeHtml(txt)}</div>
+    </div>`;
+  }).join("");
+  return `<div class="top-stage-progress-inner" title="整線各階段總進度（與甘特圖同步）">${cells}</div>`;
+}
+
+function updateTopStageProgress() {
+  const el = document.getElementById("topStageProgress");
+  if (!el) return;
+  const html = buildTopStageProgressHtml();
+  el.innerHTML = html;
+  if (html) el.removeAttribute("hidden");
+  else el.setAttribute("hidden", "");
+}
+
 function renderLineGanttHtml() {
   const eqList = visibleEq();
   const range = buildGanttRange(eqList.length ? eqList : (DATA.equipment || []));
@@ -4559,21 +4662,9 @@ function renderLineGanttHtml() {
     todayAxisHtml = `<div class="gantt-today-cap" style="left:${todayLeftPct}%"><b>今天</b><i></i></div>`;
   }
 
-  // 各階段全域時段 → 底色帶＋分割線
-  const stageSpans = stages.map((_s, si) => {
-    let start = null;
-    let end = null;
-    let pctSum = 0;
-    let pctN = 0;
-    eqList.forEach(eq => {
-      const sp = stageSpanForEq(eq, si);
-      if (!sp) return;
-      if (start == null || sp.start < start) start = sp.start;
-      if (end == null || sp.end > end) end = sp.end;
-      pctSum += sp.pct || 0;
-      pctN += 1;
-    });
-    return start == null || end == null ? null : { start, end, pct: pctN ? pctSum / pctN : 0 };
+  // 各階段全域時段 → 底色帶＋分割線（與頂欄總進度同源）
+  const stageSpans = computeOverallStageSpans(eqList).map(function (sp) {
+    return sp && !sp.noRange && sp.start != null && sp.end != null ? sp : null;
   });
   const bandHtml = stageSpans.map((sp, si) => {
     if (!sp) return "";
@@ -6221,6 +6312,7 @@ function render() {
   }
   document.getElementById("title").textContent = DATA.title;
   document.getElementById("subtitle").textContent = DATA.subtitle;
+  updateTopStageProgress();
   updateFoot();
   renderProjectRail();
   updateRailCloud();
