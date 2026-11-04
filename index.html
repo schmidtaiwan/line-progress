@@ -576,6 +576,74 @@
     position: absolute; top: 0; bottom: 0; width: 2px;
     background: #c0392b; opacity: 0.85; z-index: 2; pointer-events: none;
   }
+  .gantt-head-tools {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+    margin-left: auto;
+  }
+  .gantt-mode-switch {
+    display: inline-flex; gap: 4px; align-items: center;
+    padding: 2px; border-radius: 10px; background: #eef3f8;
+    border: 1px solid #d5dee8;
+  }
+  .gantt-mode-switch button {
+    border: 0; background: transparent; color: #16324a;
+    border-radius: 8px; padding: 5px 10px; cursor: pointer;
+    font: inherit; font-size: 12px; font-weight: 700; line-height: 1.2;
+  }
+  .gantt-mode-switch button.on {
+    background: #1d4f91; color: #fff;
+    box-shadow: 0 1px 2px rgba(22, 50, 74, 0.2);
+  }
+  .gantt-mode-switch button:focus-visible { outline: 2px solid #2b6cb0; outline-offset: 1px; }
+  .gantt-day-axis {
+    display: flex; flex-direction: column; min-width: 0;
+    border: 1px solid #d5dee8; border-radius: 8px; overflow: hidden;
+    background: #fff;
+  }
+  .gantt-day-months {
+    display: grid; height: 22px;
+    font-size: 11px; font-weight: 800; color: #16324a;
+    border-bottom: 1px solid #b7c9db;
+    background: #e8eef5;
+  }
+  .gantt-day-months > span {
+    display: flex; align-items: center; justify-content: center;
+    border-right: 1px solid #94a3b8;
+    white-space: nowrap; overflow: hidden;
+  }
+  .gantt-day-months > span:last-child { border-right: 0; }
+  .gantt-day-days {
+    display: grid; height: 22px;
+    font-size: 10px; color: #64748b;
+    font-variant-numeric: tabular-nums;
+  }
+  .gantt-day-days > span {
+    display: flex; align-items: center; justify-content: center;
+    border-right: 1px solid #e8eef5;
+    min-width: 0;
+  }
+  .gantt-day-days > span:last-child { border-right: 0; }
+  .gantt-day-days > span.weekend { background: #f1f5f9; color: #94a3b8; }
+  .gantt-day-days > span.is-today {
+    color: #c0392b; font-weight: 800; background: #fdecea;
+  }
+  .gantt-track.day-grid {
+    display: grid; align-items: stretch;
+    height: 34px; padding: 0; border-radius: 6px;
+    background: #fff; overflow: hidden;
+  }
+  .gantt-track.day-grid.overall { height: 38px; }
+  .gantt-track.day-grid .gantt-day-cell {
+    border-right: 1px solid #eef2f6; background: #f8fafc; min-width: 0;
+  }
+  .gantt-track.day-grid .gantt-day-cell.weekend { background: #f1f5f9; }
+  .gantt-track.day-grid .gantt-day-cell.is-today {
+    background: rgba(192, 57, 43, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(192, 57, 43, 0.25);
+  }
+  .gantt-grid.gantt-day-mode {
+    min-width: max(1010px, 420px + var(--gantt-day-min, 720px));
+  }
   .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
   .card {
     background: var(--card);
@@ -2047,7 +2115,11 @@ const PROJECTS_STORE = "vivo_line_projects_meta_v1";
 const PROJECTS_OVERVIEW_ID = "__projects_overview__";
 const PROJECTS_OVERVIEW = { id: PROJECTS_OVERVIEW_ID, name: "專案總覽", folderPath: "" };
 const DATA = loadData();
-const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, itemsSettingsOpen: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, lastSyncedFp: "", mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, stageRecCtx: null, openHierRemark: null, weeklyPanel: "gantt", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
+try {
+  const gm = localStorage.getItem("vivo_line_gantt_mode");
+  if (gm === "day" || gm === "scale") { /* applied after state init */ window.__INIT_GANTT_MODE = gm; }
+} catch (e) {}
+const state = { tab: "weekly", seg: "全部", q: "", eq: 0, stage: 0, onlyHigh: false, itemsExpand: false, itemsSettingsOpen: false, stageRecordOpen: null, dirty: false, mapDir: "ltr", openRemark: null, openDates: null, syncConflict: false, syncCheckBusy: false, lastSyncedFp: "", mobile: false, dateClipboard: "", dateCtxTarget: null, eqClipboard: null, eqCtxTarget: null, projectClipboard: null, projCtxTarget: null, stageRecCtx: null, openHierRemark: null, weeklyPanel: "gantt", ganttMode: "scale", reportPeriod: "today", reportCustomFrom: "", reportCustomTo: "", projects: [], project: null, projectsError: "", projectsLoading: false, overviewSnapshots: [], overviewLoading: false, cloudAccount: "", projectLoadGen: 0, bootLoading: false, bootLoadPhase: "", bootLoadStartedAt: 0, bootLoadTimer: null, projDragId: "", projDragMoved: false };
 // normalizeStructure 定義於下方；啟動時於首次 render 前再呼叫一次
 let cloudWatchTimer = null;
 const CLOUD_WATCH_MS = 60000;
@@ -2058,9 +2130,10 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 122;
-const PAGE_DATE = "2026-11-04";
+const PAGE_BUILD = 123;
+const PAGE_DATE = "2026-11-08";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
+if (window.__INIT_GANTT_MODE) { state.ganttMode = window.__INIT_GANTT_MODE; delete window.__INIT_GANTT_MODE; }
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
 const FILE_ACCEPT = ".txt,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.pdf,.zip,.7z,.rar,.msg,.eml,application/*,text/*";
 const HIERARCHY_SEED_R02 = {
@@ -4972,62 +5045,209 @@ function updateTopStageProgress() {
   else el.setAttribute("hidden", "");
 }
 
+function ganttModeOf() {
+  return state.ganttMode === "day" ? "day" : "scale";
+}
+
+function setGanttMode(mode) {
+  state.ganttMode = mode === "day" ? "day" : "scale";
+  try { localStorage.setItem("vivo_line_gantt_mode", state.ganttMode); } catch (e) {}
+}
+
+function enumerateGanttDays(range) {
+  const days = [];
+  if (!range || range.min == null || range.max == null) return days;
+  const start = new Date(range.min);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(range.max);
+  end.setHours(0, 0, 0, 0);
+  for (let t = start.getTime(); t <= end.getTime(); t += 86400000) {
+    const d = new Date(t);
+    days.push({
+      ms: t,
+      day: d.getDate(),
+      month: d.getMonth() + 1,
+      year: d.getFullYear(),
+      weekday: d.getDay()
+    });
+  }
+  return days;
+}
+
+function ganttBarStyleByDays(sp, days) {
+  if (!sp || !days.length) {
+    return { left: "0%", width: "0%", widthPct: 0, color: "#000", pct: 0 };
+  }
+  let i0 = -1;
+  let i1 = -1;
+  const start = sp.start;
+  const end = sp.end;
+  for (let i = 0; i < days.length; i++) {
+    const ms = days[i].ms;
+    if (ms + 86399999 >= start && i0 < 0) i0 = i;
+    if (ms <= end) i1 = i;
+  }
+  if (i0 < 0) i0 = 0;
+  if (i1 < 0) i1 = days.length - 1;
+  if (i1 < i0) i1 = i0;
+  const n = days.length;
+  const left = (i0 / n) * 100;
+  const width = ((i1 - i0 + 1) / n) * 100;
+  const pct = Math.max(0, Math.min(100, (sp.pct || 0) * 100));
+  return {
+    left: left.toFixed(3) + "%",
+    width: width.toFixed(3) + "%",
+    widthPct: width,
+    color: "",
+    pct: pct
+  };
+}
+
+function buildGanttDayAxisHtml(days, todayMs) {
+  if (!days.length) return "";
+  const monthCols = [];
+  let i = 0;
+  while (i < days.length) {
+    const y = days[i].year;
+    const m = days[i].month;
+    let j = i + 1;
+    while (j < days.length && days[j].year === y && days[j].month === m) j += 1;
+    monthCols.push({ label: m + "月", span: j - i });
+    i = j;
+  }
+  const monthHtml = monthCols.map(function (c) {
+    return `<span style="grid-column: span ${c.span}">${escapeHtml(c.label)}</span>`;
+  }).join("");
+  const dayHtml = days.map(function (d) {
+    const weekend = d.weekday === 0 || d.weekday === 6 ? " weekend" : "";
+    const isToday = d.ms === todayMs ? " is-today" : "";
+    return `<span class="${weekend}${isToday}" title="${d.year}/${d.month}/${d.day}">${d.day}</span>`;
+  }).join("");
+  const tpl = "repeat(" + days.length + ", minmax(16px, 1fr))";
+  let todayCap = "";
+  const ti = days.findIndex(function (d) { return d.ms === todayMs; });
+  if (ti >= 0) {
+    const left = ((ti + 0.5) / days.length) * 100;
+    todayCap = `<div class="gantt-today-cap" style="left:${left.toFixed(3)}%"><b>今天</b><i></i></div>`;
+  }
+  return `<div class="gantt-day-axis" style="position:relative">
+      ${todayCap}
+      <div class="gantt-day-months" style="grid-template-columns:${tpl}">${monthHtml}</div>
+      <div class="gantt-day-days" style="grid-template-columns:${tpl}">${dayHtml}</div>
+    </div>`;
+}
+
+function buildGanttDayTrackInner(days, todayMs, bandBarsHtml) {
+  const tpl = "repeat(" + days.length + ", minmax(16px, 1fr))";
+  const cells = days.map(function (d) {
+    const weekend = d.weekday === 0 || d.weekday === 6 ? " weekend" : "";
+    const isToday = d.ms === todayMs ? " is-today" : "";
+    return `<div class="gantt-day-cell${weekend}${isToday}"></div>`;
+  }).join("");
+  let todayHtml = "";
+  const ti = days.findIndex(function (d) { return d.ms === todayMs; });
+  if (ti >= 0) {
+    const left = ((ti + 0.5) / days.length) * 100;
+    todayHtml = `<div class="gantt-today" style="left:${left.toFixed(3)}%" title="今天"></div>`;
+  }
+  return `<div class="gantt-day-cells" style="display:contents">${cells}</div>${todayHtml}${bandBarsHtml}`;
+}
+
 function renderLineGanttHtml() {
   const eqList = visibleEq();
   const range = buildGanttRange(eqList.length ? eqList : (DATA.equipment || []));
   const stages = DATA.stages || [];
+  const mode = ganttModeOf();
   const legend = stages.map((s, i) =>
     `<span><i style="background:${STAGE_BAR_COLORS[i % STAGE_BAR_COLORS.length]}"></i>${escapeHtml(s.mark || s.name)}</span>`
   ).join("");
+  const modeSwitch = `<div class="gantt-mode-switch" role="group" aria-label="甘特顯示模式">
+      <button type="button" data-gantt-mode="scale" class="${mode === "scale" ? "on" : ""}" title="比例時間軸（現況）">比例</button>
+      <button type="button" data-gantt-mode="day" class="${mode === "day" ? "on" : ""}" title="月／日格線圖形">月／日</button>
+    </div>`;
+  const headTools = `<div class="gantt-head-tools">${modeSwitch}<div class="gantt-legend">${legend}<span>紅線＝今天</span></div></div>`;
   if (!range) {
     return `<section class="gantt-wrap">
-      <div class="gantt-head"><h2>整線進度甘特圖</h2><div class="gantt-legend">${legend}</div></div>
+      <div class="gantt-head"><h2>整線進度甘特圖</h2>${headTools}</div>
       <p class="note">尚無可繪製的時程，請到「設定」補各製程段×階段的預計開始／完成。</p>
     </section>`;
   }
-  const ticks = 6;
-  const axisMarks = [];
-  for (let i = 0; i <= ticks; i++) {
-    const t = range.min + (range.span * i) / ticks;
-    const left = (i / ticks) * 100;
-    axisMarks.push(`<span style="left:${left}%">${fmtAxisDate(t)}</span>`);
-  }
-  const today = Date.parse(new Date().toISOString().slice(0, 10) + "T00:00:00");
-  let todayHtml = "";
-  let todayAxisHtml = "";
-  let todayLeftPct = null;
-  if (today >= range.min && today <= range.max) {
-    todayLeftPct = ((today - range.min) / range.span) * 100;
-    todayHtml = `<div class="gantt-today" style="left:${todayLeftPct}%" title="今天"></div>`;
-    todayAxisHtml = `<div class="gantt-today-cap" style="left:${todayLeftPct}%"><b>今天</b><i></i></div>`;
+
+  const todayMs = Date.parse(new Date().toISOString().slice(0, 10) + "T00:00:00");
+  const days = mode === "day" ? enumerateGanttDays(range) : [];
+  const useDay = mode === "day" && days.length > 0;
+
+  function styleFor(sp, color) {
+    if (useDay) {
+      const st = ganttBarStyleByDays(sp, days);
+      st.color = color;
+      return st;
+    }
+    return ganttBarStyle(sp, range, color);
   }
 
-  // 各階段全域時段 → 底色帶＋分割線（與頂欄總進度同源）
+  let todayHtml = "";
+  let todayAxisHtml = "";
+  let axisBlock = "";
+  let dayTpl = "";
+  let trackExtraClass = "";
+  let gridExtraClass = "";
+  let gridStyle = "";
+
+  if (useDay) {
+    dayTpl = "repeat(" + days.length + ", minmax(16px, 1fr))";
+    trackExtraClass = " day-grid";
+    gridExtraClass = " gantt-day-mode";
+    gridStyle = ' style="--gantt-day-min:' + (days.length * 16) + 'px"';
+    axisBlock = buildGanttDayAxisHtml(days, todayMs);
+  } else {
+    const ticks = 6;
+    const axisMarks = [];
+    for (let i = 0; i <= ticks; i++) {
+      const t = range.min + (range.span * i) / ticks;
+      const left = (i / ticks) * 100;
+      axisMarks.push(`<span style="left:${left}%">${fmtAxisDate(t)}</span>`);
+    }
+    if (todayMs >= range.min && todayMs <= range.max) {
+      const todayLeftPct = ((todayMs - range.min) / range.span) * 100;
+      todayHtml = `<div class="gantt-today" style="left:${todayLeftPct}%" title="今天"></div>`;
+      todayAxisHtml = `<div class="gantt-today-cap" style="left:${todayLeftPct}%"><b>今天</b><i></i></div>`;
+    }
+    axisBlock = `<div class="gantt-axis">${todayAxisHtml}${axisMarks.join("")}</div>`;
+  }
+
   const stageSpans = computeOverallStageSpans(eqList).map(function (sp) {
     return sp && !sp.noRange && sp.start != null && sp.end != null ? sp : null;
   });
   const bandHtml = stageSpans.map((sp, si) => {
     if (!sp) return "";
-    const st = ganttBarStyle(sp, range, "#000");
+    const st = styleFor(sp, "#000");
     const tone = si % 2 === 0 ? "band-a" : "band-b";
     return `<div class="gantt-band ${tone}" style="left:${st.left};width:${st.width}"></div>
       <div class="gantt-split" style="left:${st.left}"></div>`;
   }).join("") + (function () {
     const last = stageSpans.filter(Boolean).slice(-1)[0];
     if (!last) return "";
-    const right = ((last.end - range.min + 86400000) / range.span) * 100;
-    return `<div class="gantt-split" style="left:${Math.min(100, right)}%"></div>`;
+    const st = styleFor(last, "#000");
+    // right edge approx: left + width
+    const leftN = parseFloat(st.left) || 0;
+    const widthN = parseFloat(st.width) || 0;
+    return `<div class="gantt-split" style="left:${Math.min(100, leftN + widthN)}%"></div>`;
   })();
 
-  // 整線：各階段取可見設備的最早開始／最晚完成
   const overallBars = stages.map((s, si) => {
     const sp = stageSpans[si];
     if (!sp) return "";
-    const st = ganttBarStyle(sp, range, STAGE_BAR_COLORS[si % STAGE_BAR_COLORS.length]);
+    const st = styleFor(sp, STAGE_BAR_COLORS[si % STAGE_BAR_COLORS.length]);
     const label = (s.mark || s.name || "").slice(0, 2);
     const txt = label + " " + st.pct.toFixed(0) + "%";
     return ganttBarHtml(st, txt, s.name + " " + st.pct.toFixed(0) + "%");
   }).join("");
+
+  function trackInner(barsHtml) {
+    if (!useDay) return bandHtml + todayHtml + barsHtml;
+    return buildGanttDayTrackInner(days, todayMs, bandHtml + barsHtml);
+  }
 
   let overallPctSum = 0;
   let overallPctN = 0;
@@ -5057,19 +5277,20 @@ function renderLineGanttHtml() {
       const bars = stages.map((s, si) => {
         const sp = stageSpanForEq(eq, si);
         if (!sp) return "";
-        const st = ganttBarStyle(sp, range, STAGE_BAR_COLORS[si % STAGE_BAR_COLORS.length]);
+        const st = styleFor(sp, STAGE_BAR_COLORS[si % STAGE_BAR_COLORS.length]);
         return ganttBarHtml(st, st.pct.toFixed(0) + "%", eq.name + "｜" + s.name + "｜" + pctText(sp.pct));
       }).join("");
       const title = (eq.seg || "") + " " + (eq.idx || "") + " " + (eq.name || "");
       const nameTxt = ((eq.idx != null && eq.idx !== "" ? eq.idx + " " : "") + (eq.name || "")).trim() || "—";
       const onMarks = enabledStageIndexes(eq).map(i => (stages[i] && (stages[i].mark || stages[i].name)) || "").filter(Boolean).join("、");
       const tip = escapeAttr(title + (onMarks ? "｜階段：" + onMarks : "") + "｜雙擊開啟清單");
+      const trackStyle = useDay ? ` style="grid-template-columns:${dayTpl}"` : "";
       return `<div class="gantt-label ${toneCls}" data-gantt-eq="${ei}" title="${tip}">${escapeHtml(nameTxt)}</div>
         <div class="gantt-meta ${toneCls}" data-gantt-eq="${ei}"><span class="pct ${pctClass(ratio)}">${pctText(ratio)}</span></div>
         <div class="gantt-meta ${toneCls}" data-gantt-eq="${ei}"><span class="s-${stName}">${escapeHtml(stName)}</span></div>
         <div class="gantt-meta ${toneCls} ${delays ? "delay-hot" : ""}" data-gantt-eq="${ei}">${delays}</div>
         <div class="gantt-meta owner ${toneCls}" data-gantt-eq="${ei}" title="${escapeAttr(eq.owner || "-")}">${escapeHtml(eq.owner || "-")}</div>
-        <div class="gantt-track ${toneCls}" data-gantt-eq="${ei}" title="${tip}">${bandHtml}${todayHtml}${bars}</div>`;
+        <div class="gantt-track${trackExtraClass} ${toneCls}" data-gantt-eq="${ei}" title="${tip}"${trackStyle}>${trackInner(bars)}</div>`;
     }).join("");
     return rail + rows;
   }).join("");
@@ -5079,31 +5300,33 @@ function renderLineGanttHtml() {
     eqList.flatMap(activeItemsOf),
     overallRatio
   );
+  const overallTrackStyle = useDay ? ` style="grid-template-columns:${dayTpl}"` : "";
 
   return `<section class="gantt-wrap">
     <div class="gantt-head">
       <h2>整線進度甘特圖</h2>
-      <div class="gantt-legend">${legend}<span>紅線＝今天</span></div>
+      ${headTools}
     </div>
-    <div class="gantt-scroll"><div class="gantt-grid">
+    <div class="gantt-scroll"><div class="gantt-grid${gridExtraClass}"${gridStyle}>
       <div class="gantt-seg-rail empty"></div>
       <div class="gantt-axis-label">項目</div>
       <div class="gantt-meta-h">完成度</div>
       <div class="gantt-meta-h">目前狀態</div>
       <div class="gantt-meta-h">延誤數</div>
       <div class="gantt-meta-h">OWNER</div>
-      <div class="gantt-axis">${todayAxisHtml}${axisMarks.join("")}</div>
+      ${axisBlock}
       <div class="gantt-seg-rail empty"></div>
       <div class="gantt-label overall">整線（所有階段）</div>
       <div class="gantt-meta"><span class="pct ${pctClass(overallRatio)}">${pctText(overallRatio)}</span></div>
       <div class="gantt-meta"><span class="s-${overallStatus}">${escapeHtml(overallStatus)}</span></div>
       <div class="gantt-meta ${overallDelay ? "delay-hot" : ""}">${overallDelay}</div>
       <div class="gantt-meta owner">—</div>
-      <div class="gantt-track overall">${bandHtml}${todayHtml}${overallBars}</div>
+      <div class="gantt-track overall${trackExtraClass}"${overallTrackStyle}>${trackInner(overallBars)}</div>
       ${eqRows || `<div class="gantt-seg-rail empty"></div><div class="gantt-label">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="note">沒有符合的設備</div>`}
     </div></div>
   </section>`;
 }
+
 
 function statusSelectValue(items, ratio) {
   if (items.some(it => it.status === "延誤中")) return "延誤中";
@@ -8900,6 +9123,17 @@ document.body.addEventListener("click", ev => {
     const id = projBtn.dataset.projectId;
     const proj = (state.projects || []).find(p => p.id === id);
     if (proj) activateProject(proj, { fromCloud: true });
+    return;
+  }
+  const ganttModeBtn = ev.target.closest("[data-gantt-mode]");
+  if (ganttModeBtn) {
+    setGanttMode(ganttModeBtn.dataset.ganttMode);
+    if (state.tab === "weekly") render();
+    else {
+      state.tab = "weekly";
+      state.weeklyPanel = "gantt";
+      render();
+    }
     return;
   }
   if (ev.target.closest("[data-show-gantt]")) {
