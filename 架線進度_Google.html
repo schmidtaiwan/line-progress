@@ -1806,12 +1806,20 @@
   .np-actions button.primary { background: #1d4f91; color: #fff; border-color: #1d4f91; }
 
   .project-rail .rail-actions {
-    display: flex; flex-direction: column; gap: 4px;
+    display: flex; flex-direction: column; gap: 6px;
     margin: 8px 0 6px; padding-top: 8px; border-top: 1px dashed var(--line);
   }
+  .project-rail .rail-actions > [data-add-project] {
+    align-self: flex-start;
+  }
+  .project-rail .rail-actions-row {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    align-items: center;
+  }
   .project-rail .rail-cloud {
-    display: flex; flex-direction: column; gap: 4px;
-    margin-top: 4px; padding-top: 4px; border-top: 1px dashed #e2e8f0;
+    display: flex; flex-wrap: wrap; gap: 4px;
+    align-items: center;
+    margin-top: 2px; padding-top: 6px; border-top: 1px dashed #e2e8f0;
   }
   .project-rail .rail-icon-btn {
     position: relative;
@@ -1836,9 +1844,10 @@
   .project-rail .rail-icon-btn[title]:focus-visible::after {
     content: attr(title);
     position: absolute;
-    left: calc(100% + 8px);
-    top: 50%;
-    transform: translateY(-50%);
+    left: 50%;
+    bottom: calc(100% + 6px);
+    top: auto;
+    transform: translateX(-50%);
     z-index: 40;
     padding: 5px 9px;
     border-radius: 8px;
@@ -1899,10 +1908,12 @@
   <div class="proj-list" id="projectList"></div>
   <div class="rail-actions" id="railActions" aria-label="專案與雲端操作">
     <button type="button" class="rail-icon-btn" data-add-project title="新增專案"><span class="ico">＋</span><span class="lbl">新增專案</span></button>
-    <button type="button" class="rail-icon-btn" data-copy-project title="複製目前專案到剪貼簿"><span class="ico">📋</span><span class="lbl">複製專案</span></button>
-    <button type="button" class="rail-icon-btn" data-paste-project title="將已複製專案貼上為新專案"><span class="ico">📄</span><span class="lbl">貼上專案</span></button>
-    <button type="button" class="rail-icon-btn danger" data-delete-project title="刪除目前專案（清單＋雲端資料夾）"><span class="ico">🗑</span><span class="lbl">刪除專案</span></button>
-    <button type="button" class="rail-icon-btn primary" data-save-all-projects title="將所有專案的本機進度寫入各自雲端資料夾"><span class="ico">💾</span><span class="lbl">全部儲存</span></button>
+    <div class="rail-actions-row" aria-label="專案操作">
+      <button type="button" class="rail-icon-btn" data-copy-project title="複製目前專案到剪貼簿"><span class="ico">📋</span><span class="lbl">複製專案</span></button>
+      <button type="button" class="rail-icon-btn" data-paste-project title="將已複製專案貼上為新專案"><span class="ico">📄</span><span class="lbl">貼上專案</span></button>
+      <button type="button" class="rail-icon-btn danger" data-delete-project title="刪除目前專案（清單＋雲端資料夾）"><span class="ico">🗑</span><span class="lbl">刪除專案</span></button>
+      <button type="button" class="rail-icon-btn primary" data-save-all-projects title="將所有專案的本機進度寫入各自雲端資料夾"><span class="ico">💾</span><span class="lbl">全部儲存</span></button>
+    </div>
     <div class="rail-cloud" id="railCloud" aria-label="雲端操作"></div>
   </div>
 </aside>
@@ -1937,7 +1948,7 @@
   <p id="subtitle"></p>
   <nav class="tabs" id="tabs">
     <button data-tab="weekly" class="active"><span class="tab-full">報表</span><span class="tab-short">報表</span></button>
-    <button data-tab="items"><span class="tab-full">清單</span><span class="tab-short">清單</span></button>
+    <button data-tab="items"><span class="tab-full">進度填寫</span><span class="tab-short">進度</span></button>
     <button data-tab="map"><span class="tab-full">總圖</span><span class="tab-short">總圖</span></button>
     <button data-tab="sheets"><span class="tab-full">試算表</span><span class="tab-short">Sheets</span></button>
     <button data-tab="settings"><span class="tab-full">⚙ 設定</span><span class="tab-short">⚙設定</span></button>
@@ -2046,7 +2057,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 119;
+const PAGE_BUILD = 121;
 const PAGE_DATE = "2026-11-04";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -5431,7 +5442,7 @@ function buildHierarchyProgressBlock(opts) {
   const headExtra = editable ? "<th>照片</th><th>操作</th>" : "";
   const note = editable
     ? `<p class="note">可在此編輯／新增層級、備註與照片。第2／1層完成率可由第3層自動彙總。編輯後請按「儲存本專案」。「報表」為只讀檢視。</p>`
-    : `<p class="note">報表為只讀顯示。新增／編輯層級、備註與照片請至「清單」。</p>`;
+    : `<p class="note">報表為只讀顯示。新增／編輯層級、備註與照片請至「進度填寫」。</p>`;
 
   return `
     <div class="hier-legend">
@@ -5458,7 +5469,7 @@ function renderHierarchyWeekly() {
   document.getElementById("weekly").innerHTML = `
     ${cloudBarHtml()}
     ${buildHierarchyProgressBlock({ editable: false })}
-    <p class="note">層級專案的「進度更新」請至清單細項登記；目前報表以層級進度表為主。</p>`;
+    <p class="note">層級專案的「進度更新」請至進度填寫細項登記；目前報表以層級進度表為主。</p>`;
 }
 
 function renderHierarchyItems() {
@@ -5470,11 +5481,11 @@ function renderHierarchyItems() {
 function renderHierarchySettings() {
   document.getElementById("settings").innerHTML = `
     <h2 class="section-title">層級專案設定</h2>
-    <p class="note">第1層＝專案（紅）、第2層＝階段（橘）、第3層＝工作項（綠）。日常編輯請至「清單」；「報表」僅供檢視。</p>
+    <p class="note">第1層＝專案（紅）、第2層＝階段（橘）、第3層＝工作項（綠）。日常編輯請至「進度填寫」；「報表」僅供檢視。</p>
     <div class="toolbar" style="margin-bottom:10px">
       <button type="button" class="btn-cloud" data-hier-rollup>依下層重算完成率</button>
       <button type="button" class="btn-cloud" data-hier-import-pdf title="匯入晶睿TY2 R02 電力／CDA／排氣進度表">匯入 PDF 水電進度表</button>
-      <button type="button" class="btn-cloud" data-goto-hier-items>前往清單編輯</button>
+      <button type="button" class="btn-cloud" data-goto-hier-items>前往進度填寫</button>
     </div>`;
 }
 
@@ -5655,7 +5666,7 @@ function buildProgressUpdatesHtml(opts) {
           <td>${escapeHtml(r.by || "—")}</td>
         </tr>`;
       }).join("")
-    : `<tr><td colspan="${colSpan}">此區間尚無進度更新。請至「清單」展開細項，按「今日進度」填寫更新內容說明後登記。</td></tr>`;
+    : `<tr><td colspan="${colSpan}">此區間尚無進度更新。請至「進度填寫」展開細項，按「今日進度」填寫更新內容說明後登記。</td></tr>`;
   const cards = pack.rows.length
     ? pack.rows.map(function (r) {
         return `<article class="m-eq-card">
@@ -6674,11 +6685,11 @@ function buildSettingsBodyHtml(opts) {
   const treeSection = includeTree ? `
       <section class="settings-panel full">
         <h2>⑤ 結構樹／匯入</h2>
-        <p class="hint">樹狀工作項請至「清單」編輯；此處提供重算與匯入。新增設備後會自動改走設備 checklist 畫面。</p>
+        <p class="hint">樹狀工作項請至「進度填寫」編輯；此處提供重算與匯入。新增設備後會自動改走設備 checklist 畫面。</p>
         <div class="toolbar" style="margin-bottom:10px">
           <button type="button" class="btn-cloud" data-hier-rollup>依下層重算完成率</button>
           <button type="button" class="btn-cloud" data-hier-import-pdf title="匯入晶睿TY2 R02 電力／CDA／排氣進度表">匯入 PDF 水電進度表</button>
-          <button type="button" class="btn-cloud" data-goto-hier-items>前往清單編輯結構</button>
+          <button type="button" class="btn-cloud" data-goto-hier-items>前往進度填寫</button>
         </div>
         <p class="note">目前節點 ${ (DATA.nodes || []).length }　｜　設備 ${ (DATA.equipment || []).length }　｜　階段 ${ (DATA.stages || []).length }</p>
       </section>` : "";
