@@ -644,6 +644,17 @@
   .gantt-grid.gantt-day-mode {
     min-width: max(1010px, 420px + var(--gantt-day-min, 720px));
   }
+  .gantt-grid.gantt-overview {
+    grid-template-columns: 148px 64px 72px 52px 72px minmax(360px, 1fr);
+    min-width: 900px;
+  }
+  .gantt-grid.gantt-overview.gantt-day-mode {
+    min-width: max(900px, 400px + var(--gantt-day-min, 720px));
+  }
+  .gantt-label[data-open-project-id],
+  .gantt-track[data-open-project-id],
+  .gantt-meta[data-open-project-id] { cursor: pointer; }
+  .gantt-label[data-open-project-id]:hover { background: #e7f0f7; }
   .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
   .card {
     background: var(--card);
@@ -2130,7 +2141,7 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 123;
+const PAGE_BUILD = 124;
 const PAGE_DATE = "2026-11-08";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 if (window.__INIT_GANTT_MODE) { state.ganttMode = window.__INIT_GANTT_MODE; delete window.__INIT_GANTT_MODE; }
@@ -5523,6 +5534,262 @@ function buildSnapEquipmentRowsHtml(snap, withProjectCol) {
   return rows.join("");
 }
 
+
+/** 專案總覽：單一 snapshot 各階段彙總時段（不依賴目前 DATA） */
+function stageSpanForEqCtx(eq, si, milestones) {
+  if (!eq) return null;
+  if (Array.isArray(eq.stageOn) && eq.stageOn[si] === false) return null;
+  const mile = (milestones || []).find(function (m) { return m && m.seg === eq.seg; }) || { dates: [], starts: [] };
+  const st = (eq.stages && eq.stages[si]) || {};
+  const items = st.items || [];
+  const itemEnds = items.map(function (it) { return parseDateMs(it.due); }).filter(Boolean);
+  const itemStarts = items.map(function (it) { return parseDateMs(it.start); }).filter(Boolean);
+  let end = parseDateMs(st.due) || parseDateMs(mile.dates && mile.dates[si]) || (itemEnds.length ? Math.max.apply(null, itemEnds) : null);
+  let start = parseDateMs(mile.starts && mile.starts[si]) || (itemStarts.length ? Math.min.apply(null, itemStarts) : null);
+  const dur = (STAGE_BAR_DUR[si] || 5) - 1;
+  if (end != null && start == null) start = end - dur * 86400000;
+  if (start != null && end == null) end = start + dur * 86400000;
+  if (start == null || end == null) return null;
+  if (end < start) end = start;
+  return { start: start, end: end, pct: ratioOf(items) };
+}
+
+function computeSnapOverallStageSpans(snap) {
+  const stages = (snap && snap.stages) || [];
+  const list = (snap && snap.equipment) || [];
+  const milestones = (snap && snap.milestones) || [];
+  if (!stages.length) return [];
+  return stages.map(function (_s, si) {
+    let start = null;
+    let end = null;
+    let pctSum = 0;
+    let pctN = 0;
+    list.forEach(function (eq) {
+      const sp = stageSpanForEqCtx(eq, si, milestones);
+      if (!sp) return;
+      if (start == null || sp.start < start) start = sp.start;
+      if (end == null || sp.end > end) end = sp.end;
+      pctSum += sp.pct || 0;
+      pctN += 1;
+    });
+    if (start == null || end == null) {
+      pctSum = 0;
+      pctN = 0;
+      list.forEach(function (eq) {
+        if (Array.isArray(eq.stageOn) && eq.stageOn[si] === false) return;
+        const st = eq.stages && eq.stages[si];
+        const items = (st && st.items) || [];
+        pctSum += ratioOf(items);
+        pctN += 1;
+      });
+      return { start: null, end: null, pct: pctN ? pctSum / pctN : 0, noRange: true };
+    }
+    return { start: start, end: end, pct: pctN ? pctSum / pctN : 0 };
+  });
+}
+
+function buildOverviewGanttRange(snaps) {
+  let min = null;
+  let max = null;
+  (snaps || []).forEach(function (snap) {
+    computeSnapOverallStageSpans(snap).forEach(function (sp) {
+      if (!sp || sp.noRange || sp.start == null || sp.end == null) return;
+      if (min == null || sp.start < min) min = sp.start;
+      if (max == null || sp.end > max) max = sp.end;
+    });
+    // 層級專案：用節點起迄補範圍
+    if (!usesChecklistViews(snap)) {
+      (snap.nodes || []).forEach(function (n) {
+        const a = parseDateMs(n.start);
+        const b = parseDateMs(n.finish || n.due);
+        if (a != null) { if (min == null || a < min) min = a; if (max == null || a > max) max = a; }
+        if (b != null) { if (min == null || b < min) min = b; if (max == null || b > max) max = b; }
+      });
+    }
+  });
+  if (min == null || max == null) return null;
+  if (max <= min) max = min + 7 * 86400000;
+  min -= 2 * 86400000;
+  max += 2 * 86400000;
+  return { min: min, max: max, span: max - min };
+}
+
+function snapActiveItems(snap) {
+  if (usesChecklistViews(snap)) {
+    return (snap.equipment || []).flatMap(function (eq) {
+      return (eq.stages || []).flatMap(function (st, si) {
+        if (Array.isArray(eq.stageOn) && eq.stageOn[si] === false) return [];
+        return st.items || [];
+      });
+    });
+  }
+  return (snap.nodes || []).filter(function (n) { return (n.level || 1) >= 3; }).map(function (n) {
+    return { pct: n.pct || 0, status: (Number(n.pct) || 0) >= 0.999 ? "已完成" : "進行中", urg: n.urg || "中" };
+  });
+}
+
+function snapPrimaryOwner(snap) {
+  if (usesChecklistViews(snap)) {
+    const owners = [];
+    const seen = {};
+    (snap.equipment || []).forEach(function (eq) {
+      const o = String(eq.owner || "").trim();
+      if (!o || o === "-" || seen[o]) return;
+      seen[o] = true;
+      owners.push(o);
+    });
+    return owners[0] || "—";
+  }
+  return "—";
+}
+
+function overviewStageLegendHtml(snaps) {
+  const maxN = Math.max.apply(null, [0].concat((snaps || []).map(function (s) {
+    return (s.stages || []).length;
+  })));
+  if (!maxN) return "";
+  const chips = [];
+  for (let i = 0; i < maxN; i++) {
+    const names = [];
+    const seen = {};
+    (snaps || []).forEach(function (snap) {
+      const s = (snap.stages || [])[i];
+      if (!s) return;
+      const lab = String(s.mark || s.name || ("階" + (i + 1))).trim();
+      if (!lab || seen[lab]) return;
+      seen[lab] = true;
+      names.push(lab);
+    });
+    const label = names.length ? names.join("/") : ("階段" + (i + 1));
+    chips.push(`<span><i style="background:${STAGE_BAR_COLORS[i % STAGE_BAR_COLORS.length]}"></i>${escapeHtml(label)}</span>`);
+  }
+  return chips.join("");
+}
+
+/** 專案總覽總表：一列＝一個專案（項目欄顯示專案名稱） */
+function renderOverviewProjectsGanttHtml(snaps) {
+  const list = Array.isArray(snaps) ? snaps : [];
+  const mode = ganttModeOf();
+  const legend = overviewStageLegendHtml(list);
+  const modeSwitch = `<div class="gantt-mode-switch" role="group" aria-label="甘特顯示模式">
+      <button type="button" data-gantt-mode="scale" class="${mode === "scale" ? "on" : ""}" title="比例時間軸">比例</button>
+      <button type="button" data-gantt-mode="day" class="${mode === "day" ? "on" : ""}" title="月／日格線圖形">月／日</button>
+    </div>`;
+  const headTools = `<div class="gantt-head-tools">${modeSwitch}<div class="gantt-legend">${legend}<span>紅線＝今天</span></div></div>`;
+  const range = buildOverviewGanttRange(list);
+  if (!range) {
+    return `<section class="gantt-wrap">
+      <div class="gantt-head"><h2>專案總覽甘特｜各專案</h2>${headTools}</div>
+      <p class="note">尚無可繪製的專案時程。請先進入各專案補階段預計開始／完成。</p>
+    </section>`;
+  }
+
+  const todayMs = Date.parse(new Date().toISOString().slice(0, 10) + "T00:00:00");
+  const days = mode === "day" ? enumerateGanttDays(range) : [];
+  const useDay = mode === "day" && days.length > 0;
+
+  function styleFor(sp, color) {
+    if (useDay) {
+      const st = ganttBarStyleByDays(sp, days);
+      st.color = color;
+      return st;
+    }
+    return ganttBarStyle(sp, range, color);
+  }
+
+  let todayHtml = "";
+  let todayAxisHtml = "";
+  let axisBlock = "";
+  let dayTpl = "";
+  let trackExtraClass = "";
+  let gridExtraClass = " gantt-overview";
+  let gridStyle = "";
+
+  if (useDay) {
+    dayTpl = "repeat(" + days.length + ", minmax(16px, 1fr))";
+    trackExtraClass = " day-grid";
+    gridExtraClass += " gantt-day-mode";
+    gridStyle = ' style="--gantt-day-min:' + (days.length * 16) + 'px"';
+    axisBlock = buildGanttDayAxisHtml(days, todayMs);
+  } else {
+    const ticks = 6;
+    const axisMarks = [];
+    for (let i = 0; i <= ticks; i++) {
+      const t = range.min + (range.span * i) / ticks;
+      const left = (i / ticks) * 100;
+      axisMarks.push(`<span style="left:${left}%">${fmtAxisDate(t)}</span>`);
+    }
+    if (todayMs >= range.min && todayMs <= range.max) {
+      const todayLeftPct = ((todayMs - range.min) / range.span) * 100;
+      todayHtml = `<div class="gantt-today" style="left:${todayLeftPct}%" title="今天"></div>`;
+      todayAxisHtml = `<div class="gantt-today-cap" style="left:${todayLeftPct}%"><b>今天</b><i></i></div>`;
+    }
+    axisBlock = `<div class="gantt-axis">${todayAxisHtml}${axisMarks.join("")}</div>`;
+  }
+
+  function trackInner(barsHtml, bandHtml) {
+    if (!useDay) return (bandHtml || "") + todayHtml + barsHtml;
+    return buildGanttDayTrackInner(days, todayMs, (bandHtml || "") + barsHtml);
+  }
+
+  const rows = list.map(function (snap, idx) {
+    const pid = (snap.project && snap.project.id) || "";
+    const name = snap.name || (snap.project && snap.project.name) || ("專案" + (idx + 1));
+    const items = snapActiveItems(snap);
+    const ratio = usesChecklistViews(snap)
+      ? ratioOf(items)
+      : (function () {
+          const root = (snap.nodes || []).find(function (n) { return n.level === 1; }) || (snap.nodes || [])[0];
+          return root ? (Number(root.pct) || 0) : 0;
+        })();
+    const stName = statusSelectValue(items, ratio);
+    const delays = items.filter(function (it) { return it.status === "延誤中"; }).length;
+    const owner = snapPrimaryOwner(snap);
+    const stages = snap.stages || [];
+    const spans = computeSnapOverallStageSpans(snap);
+    const bars = stages.map(function (s, si) {
+      const sp = spans[si];
+      if (!sp || sp.noRange || sp.start == null) {
+        // 無時程仍可顯示 0 寬？略過
+        if (!sp || sp.pct == null) return "";
+        return "";
+      }
+      const st = styleFor(sp, STAGE_BAR_COLORS[si % STAGE_BAR_COLORS.length]);
+      const label = String(s.mark || s.name || "").slice(0, 2);
+      const txt = label + " " + st.pct.toFixed(0) + "%";
+      return ganttBarHtml(st, txt, name + "｜" + (s.name || s.mark || "") + "｜" + st.pct.toFixed(0) + "%");
+    }).join("");
+    // 若全無時程但有完成率：仍顯示空軌
+    const tone = idx % 2 === 0 ? "gantt-seg-a" : "gantt-seg-b";
+    const tip = escapeAttr(name + "｜點擊進入專案");
+    const openAttr = pid ? ` data-open-project-id="${escapeAttr(pid)}"` : "";
+    const trackStyle = useDay ? ` style="grid-template-columns:${dayTpl}"` : "";
+    return `<div class="gantt-label ${tone}"${openAttr} title="${tip}">${escapeHtml(name)}</div>
+      <div class="gantt-meta ${tone}"${openAttr}><span class="pct ${pctClass(ratio)}">${pctText(ratio)}</span></div>
+      <div class="gantt-meta ${tone}"${openAttr}><span class="s-${stName}">${escapeHtml(stName)}</span></div>
+      <div class="gantt-meta ${tone} ${delays ? "delay-hot" : ""}"${openAttr}>${delays}</div>
+      <div class="gantt-meta owner ${tone}"${openAttr} title="${escapeAttr(owner)}">${escapeHtml(owner)}</div>
+      <div class="gantt-track${trackExtraClass} ${tone}"${openAttr} title="${tip}"${trackStyle}>${trackInner(bars, "")}</div>`;
+  }).join("");
+
+  return `<section class="gantt-wrap">
+    <div class="gantt-head">
+      <h2>專案總覽甘特｜各專案</h2>
+      ${headTools}
+    </div>
+    <p class="note" style="margin:0 0 8px">總表一列一個專案（項目＝專案名稱）。點列可進入該專案。</p>
+    <div class="gantt-scroll"><div class="gantt-grid${gridExtraClass}"${gridStyle}>
+      <div class="gantt-axis-label">項目</div>
+      <div class="gantt-meta-h">完成度</div>
+      <div class="gantt-meta-h">目前狀態</div>
+      <div class="gantt-meta-h">延誤數</div>
+      <div class="gantt-meta-h">OWNER</div>
+      ${axisBlock}
+      ${rows || `<div class="gantt-label">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="gantt-meta">—</div><div class="note">尚無專案</div>`}
+    </div></div>
+  </section>`;
+}
+
 function renderProjectsOverviewWeekly() {
   const snaps = state.overviewSnapshots || [];
   if (state.overviewLoading) {
@@ -5591,6 +5858,7 @@ function renderProjectsOverviewWeekly() {
 
   document.getElementById("weekly").innerHTML = `
     ${cloudBarHtml()}
+    ${renderOverviewProjectsGanttHtml(snaps)}
     <section class="proj-overview-block proj-overview-merged">
       <h3><span>專案總覽報表｜全部專案合併</span><span style="font-size:13px;font-weight:600;color:var(--muted)">${snaps.length} 個專案</span></h3>
       <p class="note" style="margin-top:0">將所有專案設備進度放在同一張表，方便一次對照。</p>
