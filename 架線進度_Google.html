@@ -2141,8 +2141,8 @@ try {
 } catch (e) {}
 
 // 版次顯示：版次{流水號} ({日期})；每次改網頁請把 PAGE_BUILD +1，並更新 PAGE_DATE
-const PAGE_BUILD = 124;
-const PAGE_DATE = "2026-11-08";
+const PAGE_BUILD = 125;
+const PAGE_DATE = "2026-11-06";
 const PAGE_VERSION = PAGE_BUILD + " (" + PAGE_DATE + ")";
 if (window.__INIT_GANTT_MODE) { state.ganttMode = window.__INIT_GANTT_MODE; delete window.__INIT_GANTT_MODE; }
 const STAGE_REC_KINDS = ["重要事項", "共同事項", "會議記錄"];
@@ -4623,14 +4623,19 @@ function renderBootLoadGate() {
   prepareLockedShell();
   const phase = escapeHtml(state.bootLoadPhase || "載入資料中…");
   const t = formatBootLoadTimer(bootLoadElapsedSec());
+  const openingLogin = /登入/.test(state.bootLoadPhase || "");
+  const lead = openingLogin
+    ? "請在跳出的 Google 視窗選帳號。若沒有視窗，請允許這個網站的彈出視窗，再按一次登入。"
+    : "已登入 Google，正在載入雲端專案與進度資料。";
+  const hint = openingLogin ? "若視窗被擋住或關掉，會回到這個登入鈕，再按一次即可。" : "載入資料中，請稍候…";
   document.getElementById("weekly").innerHTML = `
     <div class="login-gate">
       <h2>登入後繼續</h2>
-      <p>已登入 Google，正在載入雲端專案與進度資料。</p>
+      <p>${lead}</p>
       <div class="boot-load-status" role="status" aria-live="polite">
         <p class="phase" id="bootLoadPhase">${phase}</p>
         <p class="timer" id="bootLoadTimer">${t}</p>
-        <p class="hint">載入資料中，請稍候…</p>
+        <p class="hint">${hint}</p>
       </div>
       ${cloudBarHtml()}
     </div>`;
@@ -8807,7 +8812,10 @@ function patchItemField(itemIdx, field, raw) {
   }
 }
 
+let cloudLoginBusy = false;
 async function cloudLogin() {
+  if (cloudLoginBusy) return;
+  cloudLoginBusy = true;
   try {
     startBootLoadUI("正在開啟 Google 登入…");
     toast("正在登入…");
@@ -8838,6 +8846,7 @@ async function cloudLogin() {
     console.error(e);
     toast("登入失敗：" + (e.message || e));
   } finally {
+    cloudLoginBusy = false;
     stopBootLoadUI();
     render();
   }

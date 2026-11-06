@@ -18,6 +18,9 @@
     viewerList: []
   };
   let tokenClient = null;
+  /** 目前這次取 token 的等待；視窗被擋或關掉時要用它結束，避免登入畫面一直轉 */
+  let tokenPending = null;
+  let tokenRequestGen = 0;
   let uploadTimer = null;
   let cachedFolderId = "";
   let presenceTimer = null;
@@ -1654,6 +1657,28 @@
 
   function initMsal() { return ensureInit(); }
 
+  function gisErrorMessage(err) {
+    const type = String((err && (err.type || err.message)) || "");
+    if (type === "popup_failed_to_open") {
+      return "瀏覽器擋住了 Google 登入視窗。請允許這個網站的彈出視窗，再按一次「登入 Google」。";
+    }
+    if (type === "popup_closed") {
+      return "已關閉 Google 登入視窗，請再按一次「登入 Google」。";
+    }
+    if (/superseded/.test(type)) return "已改開新的登入視窗";
+    return "Google 登入未完成" + (type ? "（" + type + "）" : "") + "。請再試一次。";
+  }
+
+  function settleTokenPending(gen, err, token) {
+    const pending = tokenPending;
+    if (!pending || pending.gen !== gen) return false;
+    tokenPending = null;
+    if (pending.timer) clearTimeout(pending.timer);
+    if (err) pending.reject(err);
+    else pending.resolve(token);
+    return true;
+  }
+
   function ensureInit() {
     const id = (cfg.clientId || "").trim();
     if (!id || id.indexOf("PLEASE_") === 0) {
@@ -1664,7 +1689,12 @@
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: id,
         scope: SCOPES,
-        callback: function () {}
+        callback: function () {},
+        // 視窗被擋、使用者關掉時，GIS 不會走 callback，必須靠這個把登入結束掉
+        error_callback: function (err) {
+          const gen = tokenPending ? tokenPending.gen : 0;
+          settleTokenPending(gen, new Error(gisErrorMessage(err)));
+        }
       });
       state.ready = true;
     });
@@ -1672,21 +1702,34 @@
 
   function requestToken(prompt, hintEmail) {
     return ensureInit().then(function () {
+      const gen = ++tokenRequestGen;
+      if (tokenPending) {
+        settleTokenPending(tokenPending.gen, new Error("superseded"));
+      }
       return new Promise(function (resolve, reject) {
+        const timer = setTimeout(function () {
+          settleTokenPending(gen, new Error("登入逾時。若沒看到 Google 視窗，請允許彈出視窗後再按一次「登入 Google」。"));
+        }, 120000);
+        tokenPending = { gen: gen, resolve: resolve, reject: reject, timer: timer };
         tokenClient.callback = function (resp) {
-          if (resp.error) {
-            reject(new Error(resp.error_description || resp.error));
+          if (!tokenPending || tokenPending.gen !== gen) return;
+          if (resp && resp.error) {
+            settleTokenPending(gen, new Error(resp.error_description || resp.error));
             return;
           }
           state.token = resp.access_token;
           const sec = Number(resp.expires_in) || 3600;
           tokenExpiresAt = Date.now() + Math.max(60, sec - 90) * 1000;
-          resolve(resp.access_token);
+          settleTokenPending(gen, null, resp.access_token);
         };
         const req = { prompt: prompt || "" };
         // 已登入時帶 hint，避免「從雲端載入」又跳出選帳戶
         if (hintEmail) req.hint = hintEmail;
-        tokenClient.requestAccessToken(req);
+        try {
+          tokenClient.requestAccessToken(req);
+        } catch (e) {
+          settleTokenPending(gen, e instanceof Error ? e : new Error(String(e)));
+        }
       });
     });
   }
@@ -1949,7 +1992,11 @@
     state.token = "";
     tokenExpiresAt = 0;
     const hint = accountHint();
-    const run = requestToken("", hint).catch(function () {
+    const run = requestToken("", hint).catch(function (err) {
+      // 另一次登入已接手時不要再跳一個選帳戶視窗
+      if (err && /superseded|已改開新的登入/.test(String(err.message || err))) {
+        return Promise.reject(err);
+      }
       // 靜默續期失敗（分頁開太久、工作階段過期）才請使用者再選一次帳號
       return requestToken("select_account", "");
     }).then(function (tok) {
